@@ -6,7 +6,8 @@ using namespace eggmock;
 
 extern "C"
 {
-  eggmock::mig_rewrite lime_rewrite();
+  //extern "C" fn ambit_compiler() -> MigReceiverFFI<()>
+  mig_receiver<void> ambit_compiler();
 }
 
 int main()
@@ -21,9 +22,5 @@ int main()
   const auto bi = in.create_or( O1, O2 );
   in.create_po( bi );
 
-  write_dot( in, "in.dot" );
-
-  mig_network out = rewrite_mig( in, lime_rewrite() );
-
-  write_dot( out, "out.dot" );
+  eggmock::send_mig( in, ambit_compiler() );
 }
