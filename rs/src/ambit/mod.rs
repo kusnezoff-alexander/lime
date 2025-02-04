@@ -1,12 +1,18 @@
 mod compilation;
+mod extraction;
 mod program;
 mod rows;
 
-pub use compilation::compile;
-use eggmock::egg::{CostFunction, EGraph, Extractor, Id, Language};
-use eggmock::{MigLanguage, MigReceiverFFI, Provider, Receiver, ReceiverFFI};
+use self::compilation::compile;
+use self::extraction::CompilingCostFunction;
+
+use eggmock::egg::{rewrite, EGraph, Extractor, Id, Runner};
+use eggmock::{
+    Mig, MigLanguage, MigNode, MigReceiverFFI, Provider, Receiver, Rewriter, RewriterFFI,
+};
 use program::*;
 use rows::*;
+use std::time::Duration;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BitwiseOperand {
@@ -32,44 +38,78 @@ impl BitwiseOperand {
     }
 }
 
-#[no_mangle]
-extern "C" fn ambit_compiler() -> MigReceiverFFI<()> {
-    MigReceiverFFI::new(EGraph::<MigLanguage, ()>::new(()).map(|(graph, outputs)| {
+pub struct AmbitRewriter {}
+
+impl Rewriter for AmbitRewriter {
+    type Network = Mig;
+    type Intermediate = (EGraph<MigLanguage, ()>, Vec<Id>);
+    type Receiver = EGraph<MigLanguage, ()>;
+
+    fn create_receiver(&mut self) -> Self::Receiver {
+        EGraph::new(())
+    }
+
+    fn rewrite(
+        self,
+        (graph, outputs): (EGraph<MigLanguage, ()>, Vec<Id>),
+        output: impl Receiver<Node = MigNode, Result = ()>,
+    ) {
         use BitwiseOperand::*;
         let architecture = Architecture {
             maj_ops: vec![
                 [T(0), T(1), T(2)],
                 [T(1), T(2), T(3)],
-                [DCC {
-                    index: 0,
-                    inverted: false
-                }, T(1), T(2)],
-                [DCC {
-                    index: 0,
-                    inverted: false
-                }, T(0), T(3)]
+                [
+                    DCC {
+                        index: 0,
+                        inverted: false,
+                    },
+                    T(1),
+                    T(2),
+                ],
+                [
+                    DCC {
+                        index: 0,
+                        inverted: false,
+                    },
+                    T(0),
+                    T(3),
+                ],
             ],
             num_dcc: 2,
         };
-        graph.dot().to_dot("egraph.dot").expect("dotting should not fail");
 
-        let extractor = Extractor::new(&graph, ConstCostFunction);
+        let rules = &[
+            rewrite!("commute_1"; "(maj ?a ?b ?c)" => "(maj ?b ?a ?c)"),
+            rewrite!("commute_2"; "(maj ?a ?b ?c)" => "(maj ?a ?c ?b)"),
+            rewrite!("example"; "(maj (! f) ?a (maj f ?b ?c))" => "(maj (! f) ?a (maj ?a ?b ?c))"),
+        ];
+        let runner = Runner::default()
+            .with_time_limit(Duration::from_secs(60))
+            .with_egraph(graph)
+            .run(rules);
+        runner.print_report();
+        let graph = runner.egraph;
+        graph
+            .dot()
+            .to_dot("egraph.dot")
+            .expect("dotting should not fail");
+
+        let extractor = Extractor::new(
+            &graph,
+            CompilingCostFunction {
+                architecture: &architecture,
+            },
+        );
         let ntk = (extractor, outputs);
         let ntk = ntk.with_backward_edges();
         let program = compile(&architecture, &ntk);
-        println!("{program}")
-    }))
+        println!("{program}");
+        ntk.send(output);
+    }
 }
 
-pub struct ConstCostFunction;
-
-impl<L: Language> CostFunction<L> for ConstCostFunction {
-    type Cost = u32;
-
-    fn cost<C>(&mut self, _: &L, _: C) -> Self::Cost
-    where
-        C: FnMut(Id) -> Self::Cost
-    {
-        1
-    }
+#[no_mangle]
+extern "C" fn ambit_rewriter() -> MigReceiverFFI<RewriterFFI<Mig>> {
+    RewriterFFI::new(AmbitRewriter {})
 }

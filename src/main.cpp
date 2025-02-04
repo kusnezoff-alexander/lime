@@ -1,4 +1,6 @@
 #include "eggmock.h"
+
+#include <mockturtle/io/write_dot.hpp>
 #include <mockturtle/networks/mig.hpp>
 
 using namespace mockturtle;
@@ -6,8 +8,7 @@ using namespace eggmock;
 
 extern "C"
 {
-  //extern "C" fn ambit_compiler() -> MigReceiverFFI<()>
-  mig_receiver<void> ambit_compiler();
+  mig_receiver<mig_rewrite> ambit_rewriter();
 }
 
 int main()
@@ -22,5 +23,7 @@ int main()
   const auto bi = in.create_or( O1, O2 );
   in.create_po( bi );
 
-  eggmock::send_mig( in, ambit_compiler() );
+  write_dot( in, "in.dot" );
+  mig_network rewritten = rewrite_mig( in, ambit_rewriter() );
+  write_dot( rewritten, "out.dot" );
 }
