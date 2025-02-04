@@ -142,7 +142,7 @@ impl<'a> ProgramState<'a> {
     /// spill the wrong value
     fn set_operand_signal(&mut self, operand: BitwiseOperand, signal: Signal) {
         if let Some(previous_signal) = self.rows.set_operand_signal(operand, signal) {
-            if !self.rows.contains_id(signal.node_id()) {
+            if !self.rows.contains_id(previous_signal.node_id()) {
                 let spill_id = self.rows.add_spill(previous_signal);
                 self.instructions
                     .push(Instruction::AAP(operand.into(), Address::Spill(spill_id)));

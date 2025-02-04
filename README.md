@@ -14,3 +14,4 @@ make lime
 - Handle inverted output signals
 - Ensure monotonicity in extraction cost function
 - Think of better selection strategies all around
+- Optimize generated instructions (remove unnecessary spilling, merge AAPs and AP-AAP where possible)
