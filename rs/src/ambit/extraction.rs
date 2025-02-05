@@ -188,12 +188,28 @@ impl Provider for StackedPartialGraph {
 
 impl PartialEq for CompilingCost {
     fn eq(&self, other: &Self) -> bool {
-        self.program_cost.eq(&other.program_cost)
+        if other.not_nesting == NotNesting::NestedNots && self.not_nesting == NotNesting::NestedNots {
+            true
+        } else {
+            self.program_cost.eq(&other.program_cost)
+        }
     }
 }
 
 impl PartialOrd for CompilingCost {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.program_cost.partial_cmp(&other.program_cost)
+        if self.not_nesting == NotNesting::NestedNots {
+            if other.not_nesting == NotNesting::NestedNots {
+                Some(Ordering::Equal)
+            } else {
+                Some(Ordering::Greater)
+            }
+        } else {
+            if other.not_nesting == NotNesting::NestedNots {
+                Some(Ordering::Less)
+            } else {
+                self.program_cost.partial_cmp(&other.program_cost)
+            }
+        }
     }
 }
