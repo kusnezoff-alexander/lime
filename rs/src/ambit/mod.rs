@@ -1,5 +1,6 @@
 mod compilation;
 mod extraction;
+mod optimization;
 mod program;
 mod rows;
 
@@ -22,9 +23,25 @@ pub enum BitwiseOperand {
 
 #[derive(Clone, Debug)]
 pub struct Architecture {
-    maj_ops: Vec<[BitwiseOperand; 3]>,
+    maj_ops: Vec<usize>,
     multi_activations: Vec<Vec<BitwiseOperand>>,
     num_dcc: u8,
+}
+
+impl Architecture {
+    pub fn new(multi_activations: Vec<Vec<BitwiseOperand>>, num_dcc: u8) -> Self {
+        let maj_ops = multi_activations
+            .iter()
+            .enumerate()
+            .filter(|(_, ops)| ops.len() == 3)
+            .map(|(i, _)| i)
+            .collect();
+        Self {
+            maj_ops,
+            multi_activations,
+            num_dcc,
+        }
+    }
 }
 
 impl BitwiseOperand {
@@ -35,10 +52,7 @@ impl BitwiseOperand {
         }
     }
     pub fn is_dcc(&self) -> bool {
-        match self {
-            BitwiseOperand::DCC { .. } => true,
-            _ => false,
-        }
+        matches!(self, BitwiseOperand::DCC { .. })
     }
     pub fn inverted(&self) -> bool {
         matches!(self, BitwiseOperand::DCC { inverted: true, .. })
@@ -62,11 +76,11 @@ impl Rewriter for AmbitRewriter {
         output: impl Receiver<Node = MigNode, Result = ()>,
     ) {
         use BitwiseOperand::*;
-        let architecture = Architecture {
-            maj_ops: vec![
-                [T(0), T(1), T(2)],
-                [T(1), T(2), T(3)],
-                [
+        let architecture = Architecture::new(
+            vec![
+                vec![T(0), T(1), T(2)],
+                vec![T(1), T(2), T(3)],
+                vec![
                     DCC {
                         index: 0,
                         inverted: false,
@@ -74,7 +88,7 @@ impl Rewriter for AmbitRewriter {
                     T(1),
                     T(2),
                 ],
-                [
+                vec![
                     DCC {
                         index: 0,
                         inverted: false,
@@ -83,8 +97,8 @@ impl Rewriter for AmbitRewriter {
                     T(3),
                 ],
             ],
-            num_dcc: 2,
-        };
+            2,
+        );
 
         let rules = &[
             rewrite!("commute_1"; "(maj ?a ?b ?c)" => "(maj ?b ?a ?c)"),

@@ -56,7 +56,11 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
         // select which MAJ instruction to use
         // for this we use the operation with has the most already correctly placed operands
         let mut opt = None;
-        for (id, operands) in self.architecture().maj_ops.iter().enumerate() {
+        for id in self.architecture().maj_ops.iter().copied() {
+            let operands = self.architecture().multi_activations[id]
+                .as_slice()
+                .try_into()
+                .expect("maj has to have 3 operands");
             let (matches, match_no) = self.get_mapping(&mut signals, operands);
             let dcc_cost = self.optimize_dcc_usage(&mut signals, operands, &matches);
             let cost = 3 - match_no + dcc_cost;
@@ -69,7 +73,7 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
             }
         }
         let (_, maj_id, matches, signals) = opt.unwrap();
-        let operands = self.architecture().maj_ops[maj_id];
+        let operands = &self.architecture().multi_activations[maj_id];
 
         // now we need to place the remaining non-matching operands...
 
@@ -116,7 +120,7 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
         matching: &[bool; 3],
     ) -> usize {
         // first, try using a DCC row for all non-matching rows that require inversion
-        let mut dcc_adjusted = [false;3];
+        let mut dcc_adjusted = [false; 3];
         let mut changed = true;
         while changed {
             changed = false;

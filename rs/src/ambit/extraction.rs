@@ -65,7 +65,7 @@ impl StackedPartialGraph {
         nodes.extend(
             self.nodes
                 .iter()
-                .flat_map(|map| map.iter().map(|(id, node)| (id.clone(), node.clone()))),
+                .flat_map(|map| map.iter().map(|(id, node)| (*id, node.clone()))),
         );
         nodes.insert(real_id, self.root.clone());
         CollapsedPartialGraph {
@@ -198,6 +198,7 @@ impl PartialEq for CompilingCost {
 
 impl PartialOrd for CompilingCost {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        #[allow(clippy::collapsible_else_if)]
         if self.not_nesting == NotNesting::NestedNots {
             if other.not_nesting == NotNesting::NestedNots {
                 Some(Ordering::Equal)

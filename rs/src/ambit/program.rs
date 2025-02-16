@@ -22,7 +22,7 @@ pub enum SingleRowAddress {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BitwiseAddress {
     Single(BitwiseOperand),
-    Maj(usize),
+    Multiple(usize),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -64,12 +64,12 @@ impl<'a> ProgramState<'a> {
     }
 
     pub fn maj(&mut self, op: usize, out_signal: Signal) {
-        let operands = self.architecture.maj_ops[op];
+        let operands = &self.architecture.multi_activations[op];
         for operand in operands {
-            self.set_operand_signal(operand, out_signal);
+            self.set_operand_signal(*operand, out_signal);
         }
         self.instructions
-            .push(Instruction::AP(BitwiseAddress::Maj(op).into()));
+            .push(Instruction::AP(BitwiseAddress::Multiple(op).into()));
     }
 
     pub fn signal_copy(&mut self, signal: Signal, target: BitwiseOperand, intermediate_dcc: u8) {
@@ -290,8 +290,8 @@ impl Display for Program<'_> {
                 Address::Const(c) => write!(f, "C{}", if *c { "1" } else { "0" }),
                 Address::Bitwise(b) => match b {
                     BitwiseAddress::Single(o) => write_operand(f, o),
-                    BitwiseAddress::Maj(id) => {
-                        let operands = self.architecture.maj_ops[*id];
+                    BitwiseAddress::Multiple(id) => {
+                        let operands = &self.architecture.multi_activations[*id];
                         write!(f, "[")?;
                         write_operand(f, &operands[0])?;
                         write!(f, ", ")?;
