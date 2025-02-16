@@ -58,12 +58,14 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
         let mut opt = None;
         for (id, operands) in self.architecture().maj_ops.iter().enumerate() {
             let (matches, match_no) = self.get_mapping(&mut signals, operands);
+            let dcc_cost = self.optimize_dcc_usage(&mut signals, operands, &matches);
+            let cost = 3 - match_no + dcc_cost;
             let is_opt = match &opt {
                 None => true,
-                Some((opt_no, _, _, _)) => *opt_no < match_no,
+                Some((opt_no, _, _, _)) => *opt_no > cost,
             };
             if is_opt {
-                opt = Some((match_no, id, matches, signals));
+                opt = Some((cost, id, matches, signals));
             }
         }
         let (_, maj_id, matches, signals) = opt.unwrap();
@@ -97,10 +99,61 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
         // lastly, determine new candidates
         for parent_id in self.network.node_outputs(id) {
             let parent_node = self.network.node(parent_id);
-            if parent_node.inputs().iter().all(|s| self.program.rows().contains_id(s.node_id())) {
+            if parent_node
+                .inputs()
+                .iter()
+                .all(|s| self.program.rows().contains_id(s.node_id()))
+            {
                 self.candidates.insert((parent_id, parent_node));
             }
         }
+    }
+
+    fn optimize_dcc_usage(
+        &self,
+        signals: &mut [Signal; 3],
+        operands: &[BitwiseOperand; 3],
+        matching: &[bool; 3],
+    ) -> usize {
+        // first, try using a DCC row for all non-matching rows that require inversion
+        let mut dcc_adjusted = [false;3];
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for i in 0..3 {
+                if matching[i]
+                    || operands[i].is_dcc()
+                    || self.program.rows().get_rows(signals[i]).next().is_some()
+                {
+                    continue;
+                }
+                // the i-th operand needs inversion. let's try doing this by swapping it with a
+                // signal of a DCC row so that we require one less copy operation
+                for j in 0..3 {
+                    if i == j || matching[j] || dcc_adjusted[j] {
+                        continue;
+                    }
+                    if operands[j].is_dcc() {
+                        signals.swap(i, j);
+                        dcc_adjusted[j] = true;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        let mut cost = 0;
+        for ((signal, operand), matching) in signals.iter().zip(operands).zip(matching) {
+            if *matching || operand.is_dcc() {
+                continue;
+            }
+            // if the signal is not stored somewhere, i.e. only the inverted signal is present, this
+            // requires a move via a DCC row to the actual operand
+            if self.program.rows().get_rows(*signal).next().is_none() {
+                cost += 1
+            }
+        }
+        cost
     }
 
     /// Reorders the `signals` so that the maximum number of the given signal-operator-pairs already

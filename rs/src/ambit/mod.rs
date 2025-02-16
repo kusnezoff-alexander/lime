@@ -23,6 +23,7 @@ pub enum BitwiseOperand {
 #[derive(Clone, Debug)]
 pub struct Architecture {
     maj_ops: Vec<[BitwiseOperand; 3]>,
+    multi_activations: Vec<Vec<BitwiseOperand>>,
     num_dcc: u8,
 }
 
@@ -31,6 +32,12 @@ impl BitwiseOperand {
         match self {
             BitwiseOperand::T(t) => BitwiseRow::T(*t),
             BitwiseOperand::DCC { index, .. } => BitwiseRow::DCC(*index),
+        }
+    }
+    pub fn is_dcc(&self) -> bool {
+        match self {
+            BitwiseOperand::DCC { .. } => true,
+            _ => false,
         }
     }
     pub fn inverted(&self) -> bool {

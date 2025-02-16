@@ -96,6 +96,19 @@ impl<'a> ProgramState<'a> {
         }
         let inverted_signal_row =
             inverted_signal_row.expect("inverted signal row should be present");
+        if let BitwiseOperand::DCC { inverted, index } = target {
+            // if the target is a DCC operand, we can simply copy over the signal
+            self.set_operand_signal(target, signal);
+            self.instructions.push(Instruction::AAP(
+                inverted_signal_row.into(),
+                BitwiseOperand::DCC {
+                    inverted: !inverted,
+                    index,
+                }
+                .into(),
+            ));
+            return;
+        }
         if let Row::Bitwise(BitwiseRow::DCC(dcc)) = inverted_signal_row {
             // alrighty, that's great, the inverted DCC row contains our signal
             // let's copy that over
