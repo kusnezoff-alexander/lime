@@ -1,6 +1,7 @@
 use super::{BitwiseRow, Row, SingleRowAddress, Architecture, BitwiseOperand, Program, ProgramState};
 use eggmock::{Id, MigNode, Node, ProviderWithBackwardEdges, Signal};
 use rustc_hash::FxHashSet;
+use crate::ambit::optimization::{optimize};
 
 pub fn compile<'a>(
     architecture: &'a Architecture,
@@ -41,7 +42,10 @@ pub fn compile<'a>(
             .program
             .signal_copy(output, SingleRowAddress::Out(i as u64), free_dcc);
     }
-    state.program.into()
+
+    let mut program = state.program.into();
+    optimize(&mut program);
+    program
 }
 
 pub struct CompilationState<'a, 'n, P> {

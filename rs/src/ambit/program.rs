@@ -54,6 +54,47 @@ impl<'a> Program<'a> {
     }
 }
 
+impl Instruction {
+    pub fn input_operands<'a>(
+        &self,
+        architecture: &'a Architecture,
+    ) -> impl Iterator<Item = SingleRowAddress> + 'a {
+        let from = match self {
+            Instruction::AAP(from, _) => from,
+            Instruction::AP(op) => op,
+        };
+        from.row_addresses(architecture)
+    }
+
+    pub fn overridden_rows<'a>(
+        &self,
+        architecture: &'a Architecture,
+    ) -> impl Iterator<Item = Row> + 'a {
+        let first = match self {
+            Instruction::AP(a) => a,
+            Instruction::AAP(a, _) => a,
+        }
+        .clone();
+        let first = match first {
+            Address::Bitwise(BitwiseAddress::Multiple(idx)) => {
+                architecture.multi_activations[idx].as_slice()
+            }
+            _ => &[],
+        }
+        .iter()
+        .map(|op| Row::Bitwise(op.row()));
+
+        let second = match self {
+            Instruction::AP(_) => None,
+            Instruction::AAP(_, a) => Some(a.row_addresses(architecture).map(|addr| addr.row())),
+        }
+        .into_iter()
+        .flatten();
+
+        first.chain(second)
+    }
+}
+
 impl<'a> ProgramState<'a> {
     pub fn new(
         architecture: &'a Architecture,
@@ -169,6 +210,34 @@ impl<'a> ProgramState<'a> {
 
     pub fn rows(&self) -> &Rows {
         &self.rows
+    }
+}
+
+impl Address {
+    pub fn as_single_row(&self) -> Option<SingleRowAddress> {
+        match self {
+            Address::In(i) => Some(SingleRowAddress::In(*i)),
+            Address::Out(i) => Some(SingleRowAddress::Out(*i)),
+            Address::Spill(i) => Some(SingleRowAddress::Spill(*i)),
+            Address::Const(v) => Some(SingleRowAddress::Const(*v)),
+            Address::Bitwise(BitwiseAddress::Single(op)) => Some(SingleRowAddress::Bitwise(*op)),
+            Address::Bitwise(BitwiseAddress::Multiple(_)) => None,
+        }
+    }
+    pub fn row_addresses<'a>(
+        &self,
+        architecture: &'a Architecture,
+    ) -> impl Iterator<Item = SingleRowAddress> + 'a {
+        let single = self.as_single_row().into_iter();
+        let multi = match self {
+            Address::Bitwise(BitwiseAddress::Multiple(i)) => {
+                architecture.multi_activations[*i].as_slice()
+            }
+            _ => &[],
+        }
+        .iter()
+        .map(|op| SingleRowAddress::Bitwise(*op));
+        single.chain(multi)
     }
 }
 
