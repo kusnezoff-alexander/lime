@@ -6,6 +6,7 @@ use std::ops::{Deref, DerefMut};
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Address {
     In(u64),
+    Out(u64),
     Spill(u32),
     Const(bool),
     Bitwise(BitwiseAddress),
@@ -14,6 +15,7 @@ pub enum Address {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SingleRowAddress {
     In(u64),
+    Out(u64),
     Spill(u32),
     Const(bool),
     Bitwise(BitwiseOperand),
@@ -66,19 +68,19 @@ impl<'a> ProgramState<'a> {
     pub fn maj(&mut self, op: usize, out_signal: Signal) {
         let operands = &self.architecture.multi_activations[op];
         for operand in operands {
-            self.set_operand_signal(*operand, out_signal);
+            self.set_signal(SingleRowAddress::Bitwise(*operand), out_signal);
         }
         self.instructions
             .push(Instruction::AP(BitwiseAddress::Multiple(op).into()));
     }
 
-    pub fn signal_copy(&mut self, signal: Signal, target: BitwiseOperand, intermediate_dcc: u8) {
+    pub fn signal_copy(&mut self, signal: Signal, target: SingleRowAddress, intermediate_dcc: u8) {
         {
             // if any row contains the signal, then this is easy, simply copy the row into the
             // target operand
             let signal_row = self.rows.get_rows(signal).next();
             if let Some(signal_row) = signal_row {
-                self.set_operand_signal(target, signal);
+                self.set_signal(target, signal);
                 self.instructions
                     .push(Instruction::AAP(signal_row.into(), target.into()));
                 return;
@@ -96,9 +98,10 @@ impl<'a> ProgramState<'a> {
         }
         let inverted_signal_row =
             inverted_signal_row.expect("inverted signal row should be present");
-        if let BitwiseOperand::DCC { inverted, index } = target {
+
+        if let SingleRowAddress::Bitwise(BitwiseOperand::DCC { inverted, index }) = target {
             // if the target is a DCC operand, we can simply copy over the signal
-            self.set_operand_signal(target, signal);
+            self.set_signal(target, signal);
             self.instructions.push(Instruction::AAP(
                 inverted_signal_row.into(),
                 BitwiseOperand::DCC {
@@ -109,10 +112,11 @@ impl<'a> ProgramState<'a> {
             ));
             return;
         }
+
         if let Row::Bitwise(BitwiseRow::DCC(dcc)) = inverted_signal_row {
             // alrighty, that's great, the inverted DCC row contains our signal
             // let's copy that over
-            self.set_operand_signal(target, signal);
+            self.set_signal(target, signal);
             self.instructions.push(Instruction::AAP(
                 BitwiseOperand::DCC {
                     inverted: true,
@@ -126,14 +130,14 @@ impl<'a> ProgramState<'a> {
         // this is the very sad case in which we have to use the intermediate DCC row to create the
         // signal from its inverse
         // first, copy the inverted signal from the signal_row to the DCC row
-        let intermediate_dcc_operand = BitwiseOperand::DCC {
+        let intermediate_dcc_addr = SingleRowAddress::Bitwise(BitwiseOperand::DCC {
             inverted: false,
             index: intermediate_dcc,
-        };
-        self.set_operand_signal(intermediate_dcc_operand, signal.invert());
+        });
+        self.set_signal(intermediate_dcc_addr, signal.invert());
         self.instructions.push(Instruction::AAP(
             inverted_signal_row.into(),
-            intermediate_dcc_operand.into(),
+            intermediate_dcc_addr.into(),
         ));
 
         // then copy the signal from the inverted intermediate DCC row into our target operand
@@ -141,7 +145,7 @@ impl<'a> ProgramState<'a> {
             inverted: true,
             index: intermediate_dcc,
         };
-        self.set_operand_signal(target, signal);
+        self.set_signal(target, signal);
         self.instructions.push(Instruction::AAP(
             inv_intermediate_dcc_operand.into(),
             target.into(),
@@ -153,12 +157,12 @@ impl<'a> ProgramState<'a> {
     /// previous signal
     /// **ALWAYS** call this before inserting the actual instruction, otherwise the spill code will
     /// spill the wrong value
-    fn set_operand_signal(&mut self, operand: BitwiseOperand, signal: Signal) {
-        if let Some(previous_signal) = self.rows.set_operand_signal(operand, signal) {
+    fn set_signal(&mut self, address: SingleRowAddress, signal: Signal) {
+        if let Some(previous_signal) = self.rows.set_signal(address, signal) {
             if !self.rows.contains_id(previous_signal.node_id()) {
                 let spill_id = self.rows.add_spill(previous_signal);
                 self.instructions
-                    .push(Instruction::AAP(operand.into(), Address::Spill(spill_id)));
+                    .push(Instruction::AAP(address.into(), Address::Spill(spill_id)));
             }
         }
     }
@@ -172,6 +176,7 @@ impl SingleRowAddress {
     pub fn row(&self) -> Row {
         match self {
             SingleRowAddress::In(i) => Row::In(*i),
+            SingleRowAddress::Out(i) => Row::Out(*i),
             SingleRowAddress::Spill(i) => Row::Spill(*i),
             SingleRowAddress::Const(i) => Row::Const(*i),
             SingleRowAddress::Bitwise(o) => o.row().into(),
@@ -245,6 +250,7 @@ impl From<Row> for SingleRowAddress {
     fn from(value: Row) -> Self {
         match value {
             Row::In(i) => SingleRowAddress::In(i),
+            Row::Out(i) => SingleRowAddress::Out(i),
             Row::Spill(i) => SingleRowAddress::Spill(i),
             Row::Const(c) => SingleRowAddress::Const(c),
             Row::Bitwise(b) => SingleRowAddress::Bitwise(b.into()),
@@ -262,6 +268,7 @@ impl From<SingleRowAddress> for Address {
     fn from(value: SingleRowAddress) -> Self {
         match value {
             SingleRowAddress::In(i) => Self::In(i),
+            SingleRowAddress::Out(i) => Self::Out(i),
             SingleRowAddress::Spill(i) => Self::Spill(i),
             SingleRowAddress::Const(c) => Self::Const(c),
             SingleRowAddress::Bitwise(o) => Self::Bitwise(BitwiseAddress::Single(o)),
@@ -286,6 +293,7 @@ impl Display for Program<'_> {
         let write_address = |f: &mut Formatter<'_>, a: &Address| -> std::fmt::Result {
             match a {
                 Address::In(i) => write!(f, "I{}", i),
+                Address::Out(i) => write!(f, "O{}", i),
                 Address::Spill(i) => write!(f, "S{}", i),
                 Address::Const(c) => write!(f, "C{}", if *c { "1" } else { "0" }),
                 Address::Bitwise(b) => match b {

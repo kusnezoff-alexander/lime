@@ -7,6 +7,7 @@ use std::collections::hash_map::Entry;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Row {
     In(u64),
+    Out(u64),
     Spill(u32),
     Const(bool),
     Bitwise(BitwiseRow),
@@ -80,13 +81,6 @@ impl Rows {
         self.get_address_signal(operand.into())
     }
 
-    /// Sets the signal of the given row to the given one. Returns the previous signal of that row.
-    ///
-    /// If the current signal of the row is the given signal, does nothing and returns [`None`].
-    pub fn set_bitwise(&mut self, row: BitwiseRow, signal: Signal) -> Option<Signal> {
-        self.set_row_signal(Row::from(row), signal)
-    }
-
     /// Returns all rows with the given signal.
     pub fn get_rows(&self, signal: Signal) -> impl Iterator<Item = Row> + '_ {
         self.signals.get(&signal).into_iter().flatten().cloned()
@@ -110,13 +104,13 @@ impl Rows {
     /// but inverted iff the operand is inverted.
     ///
     /// Returns the signal of the operand previous to this operation if it was changed.
-    pub fn set_operand_signal(
+    pub fn set_signal(
         &mut self,
-        operand: BitwiseOperand,
+        address: SingleRowAddress,
         signal: Signal,
     ) -> Option<Signal> {
-        self.set_bitwise(operand.row(), signal.maybe_invert(operand.inverted()))?
-            .maybe_invert(operand.inverted())
+        self.set_row_signal(address.row(), signal.maybe_invert(address.inverted()))?
+            .maybe_invert(address.inverted())
             .into()
     }
 

@@ -1,4 +1,4 @@
-use super::{Architecture, BitwiseOperand, Program, ProgramState};
+use super::{BitwiseRow, Row, SingleRowAddress, Architecture, BitwiseOperand, Program, ProgramState};
 use eggmock::{Id, MigNode, Node, ProviderWithBackwardEdges, Signal};
 use rustc_hash::FxHashSet;
 
@@ -10,7 +10,37 @@ pub fn compile<'a>(
     while let Some((id, node)) = state.candidates.iter().next() {
         state.compute(*id, *node)
     }
-    // todo: compute output signals
+
+    let mut free_dcc = None;
+    let mut free_dcc_i = None;
+    for (i, output) in network.outputs().enumerate() {
+        let dcc_row = state
+            .program
+            .rows()
+            .get_rows(output)
+            .find_map(|row| match row {
+                Row::Bitwise(BitwiseRow::DCC(dcc)) => Some(dcc),
+                _ => None,
+            });
+        if let Some(dcc_row) = dcc_row {
+            free_dcc = Some(dcc_row);
+            free_dcc_i = Some(i);
+            state
+                .program
+                .signal_copy(output, SingleRowAddress::Out(i as u64), dcc_row);
+        }
+    }
+    let free_dcc = free_dcc.unwrap_or(0);
+
+    for (i, output) in network.outputs().enumerate() {
+        if free_dcc_i == Some(i) {
+            // already copied in the previous loop
+            break;
+        }
+        state
+            .program
+            .signal_copy(output, SingleRowAddress::Out(i as u64), free_dcc);
+    }
     state.program.into()
 }
 
@@ -94,7 +124,8 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
             if matches[i] {
                 continue;
             }
-            self.program.signal_copy(signals[i], operands[i], free_dcc);
+            self.program
+                .signal_copy(signals[i], SingleRowAddress::Bitwise(operands[i]), free_dcc);
         }
 
         // all signals are in place, now we can perform the MAJ operation
