@@ -55,6 +55,21 @@ impl<'a> Program<'a> {
 }
 
 impl Instruction {
+    pub fn used_addresses<'a>(
+        &self,
+        architecture: &'a Architecture,
+    ) -> impl Iterator<Item = SingleRowAddress> + 'a {
+        let from = match self { 
+            Instruction::AAP(from, _) => from,
+            Instruction::AP(op) => op
+        }.row_addresses(architecture);
+        let to = match self {
+            Instruction::AAP(_, to) => Some(*to),
+            _ => None
+        }.into_iter().flat_map(|addr| addr.row_addresses(architecture));
+        from.chain(to)
+    }
+    
     pub fn input_operands<'a>(
         &self,
         architecture: &'a Architecture,
@@ -369,13 +384,18 @@ impl Display for Program<'_> {
                     BitwiseAddress::Single(o) => write_operand(f, o),
                     BitwiseAddress::Multiple(id) => {
                         let operands = &self.architecture.multi_activations[*id];
-                        write!(f, "[")?;
-                        write_operand(f, &operands[0])?;
-                        write!(f, ", ")?;
-                        write_operand(f, &operands[1])?;
-                        write!(f, ", ")?;
-                        write_operand(f, &operands[2])?;
-                        write!(f, "]")
+                        for i in 0..operands.len() {
+                            if i == 0 {
+                                write!(f, "[")?;
+                            } else {
+                                write!(f, ", ")?;
+                            }
+                            write_operand(f, &operands[i])?;
+                            if i == operands.len() - 1 {
+                                write!(f, "]")?;
+                            }
+                        }
+                        Ok(())
                     }
                 },
             }

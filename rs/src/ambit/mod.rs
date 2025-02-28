@@ -96,6 +96,13 @@ impl Rewriter for AmbitRewriter {
                     T(0),
                     T(3),
                 ],
+                vec![
+                    T(2),
+                    DCC {
+                        index: 0,
+                        inverted: true
+                    }
+                ]
             ],
             2,
         );
@@ -124,6 +131,7 @@ impl Rewriter for AmbitRewriter {
         );
         let ntk = (extractor, outputs);
         let ntk = ntk.with_backward_edges();
+        println!("===========================");
         let program = compile(&architecture, &ntk);
         println!("{program}");
         ntk.send(output);
