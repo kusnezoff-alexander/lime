@@ -13,7 +13,6 @@ use eggmock::{
 };
 use program::*;
 use rows::*;
-use std::time::Duration;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BitwiseOperand {
@@ -100,28 +99,26 @@ impl Rewriter for AmbitRewriter {
                     T(2),
                     DCC {
                         index: 0,
-                        inverted: true
-                    }
-                ]
+                        inverted: true,
+                    },
+                ],
             ],
             2,
         );
 
-        let rules = &[
+        let mut rules = vec![
             rewrite!("commute_1"; "(maj ?a ?b ?c)" => "(maj ?b ?a ?c)"),
             rewrite!("commute_2"; "(maj ?a ?b ?c)" => "(maj ?a ?c ?b)"),
-            rewrite!("example"; "(maj (! f) ?a (maj f ?b ?c))" => "(maj (! f) ?a (maj ?a ?b ?c))"),
+            rewrite!("not_not"; "(! (! ?a))" => "?a"),
+            rewrite!("maj_1"; "(maj ?a ?a ?b)" => "?a"),
+            rewrite!("maj_2"; "(maj ?a (! ?a) ?b)" => "?b"),
+            rewrite!("associativity"; "(maj ?a ?b (maj ?c ?b ?d))" => "(maj ?d ?b (maj ?c ?b ?a))"),
         ];
-        let runner = Runner::default()
-            .with_time_limit(Duration::from_secs(60))
-            .with_egraph(graph)
-            .run(rules);
+        rules.extend(rewrite!("invert"; "(! (maj ?a ?b ?c))" <=> "(maj (! ?a) (! ?b) (! ?c))"));
+        rules.extend(rewrite!("distributivity"; "(maj ?a ?b (maj ?c ?d ?e))" <=> "(maj (maj ?a ?b ?c) (maj ?a ?b ?d) ?e)"));
+        let runner = Runner::default().with_egraph(graph).run(&rules);
         runner.print_report();
         let graph = runner.egraph;
-        graph
-            .dot()
-            .to_dot("egraph.dot")
-            .expect("dotting should not fail");
 
         let extractor = Extractor::new(
             &graph,
