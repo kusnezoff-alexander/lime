@@ -1,7 +1,9 @@
-use super::{BitwiseRow, Row, SingleRowAddress, Architecture, BitwiseOperand, Program, ProgramState};
+use super::{
+    Architecture, BitwiseOperand, BitwiseRow, Program, ProgramState, Row, SingleRowAddress,
+};
+use crate::ambit::optimization::optimize;
 use eggmock::{Id, MigNode, Node, ProviderWithBackwardEdges, Signal};
 use rustc_hash::FxHashSet;
-use crate::ambit::optimization::{optimize};
 
 pub fn compile<'a>(
     architecture: &'a Architecture,
@@ -36,7 +38,7 @@ pub fn compile<'a>(
     for (i, output) in network.outputs().enumerate() {
         if free_dcc_i == Some(i) {
             // already copied in the previous loop
-            break;
+            continue;
         }
         state
             .program

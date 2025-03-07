@@ -11,6 +11,7 @@ eggmock = { path = "../../eggmock" }
 rustc-hash = "2.1.0"
 either = "1.13.0"
 smallvec = "1.14.0"
+ouroboros = "0.18.0"
 
 [build-dependencies]
 eggmock = { path = "../../eggmock" }

@@ -59,17 +59,20 @@ impl Instruction {
         &self,
         architecture: &'a Architecture,
     ) -> impl Iterator<Item = SingleRowAddress> + 'a {
-        let from = match self { 
+        let from = match self {
             Instruction::AAP(from, _) => from,
-            Instruction::AP(op) => op
-        }.row_addresses(architecture);
+            Instruction::AP(op) => op,
+        }
+        .row_addresses(architecture);
         let to = match self {
             Instruction::AAP(_, to) => Some(*to),
-            _ => None
-        }.into_iter().flat_map(|addr| addr.row_addresses(architecture));
+            _ => None,
+        }
+        .into_iter()
+        .flat_map(|addr| addr.row_addresses(architecture));
         from.chain(to)
     }
-    
+
     pub fn input_operands<'a>(
         &self,
         architecture: &'a Architecture,

@@ -24,7 +24,7 @@ impl Optimization<'_, '_> {
 
             // if no overridden row is live after this instruction, we can remove the instruction
             for row in instruction.overridden_rows(self.program.architecture) {
-                if liveness_after.contains(&row) {
+                if matches!(row, Row::Out(_)) || liveness_after.contains(&row) {
                     i += 1;
                     liveness_i += 1;
                     continue 'outer;
@@ -158,7 +158,7 @@ impl Optimization<'_, '_> {
                 continue;
             };
             let mut operands = self.program.architecture.multi_activations[mult_i].clone();
-            for candidate_i in i+1..instructions.len() {
+            for candidate_i in i + 1..instructions.len() {
                 if operands.is_empty() {
                     break;
                 }
@@ -168,10 +168,7 @@ impl Optimization<'_, '_> {
                     candidate
                 {
                     if operands.contains(&operand) {
-                        instructions[i] = Instruction::AAP(
-                            address,
-                            target,
-                        );
+                        instructions[i] = Instruction::AAP(address, target);
                         instructions.remove(candidate_i);
                         i += 1;
                         continue 'outer;
