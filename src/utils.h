@@ -1,19 +1,14 @@
 #pragma once
 
-#include <cstdlib>
 #include <iostream>
 #include <lorina/aiger.hpp>
 #include <lorina/bench.hpp>
-#include <lorina/blif.hpp>
 #include <lorina/common.hpp>
 #include <lorina/genlib.hpp>
 #include <lorina/pla.hpp>
 #include <lorina/verilog.hpp>
 #include <mockturtle/generators/arithmetic.hpp>
 #include <mockturtle/io/aiger_reader.hpp>
-#include <mockturtle/io/bench_reader.hpp>
-#include <mockturtle/io/blif_reader.hpp>
-#include <mockturtle/io/genlib_reader.hpp>
 #include <mockturtle/io/pla_reader.hpp>
 #include <mockturtle/io/verilog_reader.hpp>
 #include <mockturtle/networks/mig.hpp>
@@ -33,6 +28,13 @@ void preoptimize_mig( mockturtle::mig_network& ntk );
 template<class ntk_t>
 std::optional<ntk_t> get_ntk( std::string const& key )
 {
+  // Read from file
+  if ( key.find( '.' ) != std::string::npos )
+  {
+    return read_ntk<ntk_t>( key );
+  }
+
+  // Full adder
   if ( key == "fa" )
   {
     ntk_t ntk;
@@ -44,35 +46,64 @@ std::optional<ntk_t> get_ntk( std::string const& key )
     ntk.create_po( c );
     return ntk;
   }
-  else if ( key.starts_with( "add" ) )
+
+  bool const is_add = key.starts_with( "add" );
+  bool const is_mul = key.starts_with( "mul" );
+  bool const is_pop = key.starts_with( "pop" );
+  if ( is_add || is_mul || is_pop )
   {
+    unsigned long n;
     try
     {
-      auto rest = std::string_view( key ).substr( 3 );
-      unsigned long n = std::stoul( rest.data() );
+      auto const rest = std::string_view( key ).substr( 3 );
+      n = std::stoul( rest.data() );
+    }
+    catch ( std::exception& )
+    {
+      std::cerr << "invalid number given in '" << key << "'" << std::endl;
+      return {};
+    }
 
-      ntk_t ntk;
-      std::vector<typename ntk_t::signal> as;
-      std::vector<typename ntk_t::signal> bs;
+    ntk_t ntk;
+    auto const gen_inputs = [&] {
+      std::vector<typename ntk_t::signal> signals;
+      signals.reserve( n );
       for ( unsigned long i = 0; i < n; i++ )
       {
-        as.emplace_back( ntk.create_pi() );
-        bs.emplace_back( ntk.create_pi() );
+        signals.emplace_back( ntk.create_pi() );
       }
-      auto carry = ntk.get_constant( false );
-      mockturtle::carry_ripple_adder_inplace( ntk, as, bs, carry );
-      for ( auto const& sig : as )
-      {
-        ntk.create_po( sig );
-      }
-      return ntk;
-    }
-    catch ( std::exception& e )
+      return signals;
+    };
+
+    std::vector<typename ntk_t::signal> outputs;
+    if ( is_add )
     {
-      // ignore
+      auto carry = ntk.get_constant( false );
+      outputs = gen_inputs();
+      mockturtle::carry_ripple_adder_inplace( ntk, outputs, gen_inputs(), carry );
     }
+    else if ( is_mul )
+    {
+      outputs = mockturtle::carry_ripple_multiplier( ntk, gen_inputs(), gen_inputs() );
+    }
+    else if ( is_pop )
+    {
+      outputs = mockturtle::sideways_sum_adder( ntk, gen_inputs() );
+    }
+    else
+    {
+      throw;
+    }
+
+    for ( auto const& sig : outputs )
+    {
+      ntk.create_po( sig );
+    }
+    return ntk;
   }
-  return read_ntk<ntk_t>( key );
+
+  std::cerr << "invalid network '" << key << "'" << std::endl;
+  return {};
 }
 
 template<class ntk_t>

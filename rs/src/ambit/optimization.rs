@@ -3,6 +3,9 @@ use crate::ambit::program::{Address, BitwiseAddress, Instruction};
 use rustc_hash::FxHashSet;
 
 pub fn optimize(program: &mut Program) {
+    if program.instructions.len() == 0 {
+        return;
+    }
     let mut opt = Optimization { program };
     opt.dead_code_elimination();
     opt.merge_aap();

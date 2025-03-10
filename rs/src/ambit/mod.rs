@@ -4,7 +4,6 @@ mod optimization;
 mod program;
 mod rows;
 
-use std::cell::Cell;
 use std::sync::LazyLock;
 use std::time::Instant;
 
@@ -158,8 +157,8 @@ fn compiling_receiver<'a>(
         }
         let graph = runner.egraph;
 
-        let t_extractor = Cell::new(0);
-        let t_compiler = Cell::new(0);
+        let mut t_extractor = 0;
+        let mut t_compiler = 0;
 
         let output = CompilerOutput::new(
             graph,
@@ -171,13 +170,13 @@ fn compiling_receiver<'a>(
                         architecture: &architecture,
                     },
                 );
-                t_extractor.set(start_time.elapsed().as_millis());
+                t_extractor = start_time.elapsed().as_millis();
                 (extractor, outputs)
             },
             |ntk| {
                 let start_time = Instant::now();
                 let program = compile(architecture, &ntk.with_backward_edges());
-                t_compiler.set(start_time.elapsed().as_millis());
+                t_compiler = start_time.elapsed().as_millis();
                 if settings.print_program || settings.verbose {
                     if settings.verbose {
                         println!("== Program")
@@ -187,7 +186,6 @@ fn compiling_receiver<'a>(
                 program
             },
         );
-        let (t_extractor, t_compiler) = (t_extractor.get(), t_compiler.get());
         if settings.verbose {
             println!("== Timings");
             println!("t_runner: {t_runner}ms");
@@ -237,18 +235,27 @@ extern "C" fn ambit_rewriter(settings: CompilerSettings) -> MigReceiverFFI<Rewri
 }
 
 #[repr(C)]
-struct CompilingResult {
+struct CompilerStatistics {
+    egraph_classes: u64,
+    egraph_nodes: u64,
+    egraph_size: u64,
+
     instruction_count: u64,
+
     t_runner: u64,
     t_extractor: u64,
     t_compiler: u64,
 }
 
 #[no_mangle]
-extern "C" fn ambit_compile(settings: CompilerSettings) -> MigReceiverFFI<CompilingResult> {
+extern "C" fn ambit_compile(settings: CompilerSettings) -> MigReceiverFFI<CompilerStatistics> {
     let receiver =
         compiling_receiver(&*&ARCHITECTURE, REWRITE_RULES.as_slice(), settings).map(|res| {
-            CompilingResult {
+            let graph = res.output.borrow_graph();
+            CompilerStatistics {
+                egraph_classes: graph.number_of_classes() as u64,
+                egraph_nodes: graph.total_number_of_nodes() as u64,
+                egraph_size: graph.total_size() as u64,
                 instruction_count: res.output.borrow_program().instructions.len() as u64,
                 t_runner: res.t_runner as u64,
                 t_extractor: res.t_extractor as u64,
