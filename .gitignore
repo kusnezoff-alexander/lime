@@ -6,6 +6,5 @@ cmake-*/
 target/
 src/eggmock.h
 
-bench/ambit_small.csv
-bench/ambit_large.csv
+bench/ambit.csv
 bench/vis
