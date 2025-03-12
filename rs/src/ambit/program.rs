@@ -42,7 +42,7 @@ pub struct Program<'a> {
 #[derive(Debug, Clone)]
 pub struct ProgramState<'a> {
     program: Program<'a>,
-    rows: Rows,
+    rows: Rows<'a>,
 }
 
 impl<'a> Program<'a> {
@@ -120,17 +120,20 @@ impl<'a> ProgramState<'a> {
     ) -> Self {
         Self {
             program: Program::new(architecture, Vec::new()),
-            rows: Rows::new(network),
+            rows: Rows::new(network, architecture),
         }
     }
 
-    pub fn maj(&mut self, op: usize, out_signal: Signal) {
+    pub fn maj(&mut self, op: usize, out_signal: Signal, out_address: Option<Address>) {
         let operands = &self.architecture.multi_activations[op];
         for operand in operands {
             self.set_signal(SingleRowAddress::Bitwise(*operand), out_signal);
         }
-        self.instructions
-            .push(Instruction::AP(BitwiseAddress::Multiple(op).into()));
+        let instruction = match out_address {
+            Some(out) => Instruction::AAP(BitwiseAddress::Multiple(op).into(), out),
+            None => Instruction::AP(BitwiseAddress::Multiple(op).into()),
+        };
+        self.instructions.push(instruction)
     }
 
     pub fn signal_copy(&mut self, signal: Signal, target: SingleRowAddress, intermediate_dcc: u8) {

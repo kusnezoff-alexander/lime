@@ -28,8 +28,10 @@ do
   echo "Running $benchmarkName..."
   out=$(./build/lime_ambit_benchmark "$benchmark")
   if [ $? -eq 0 ]; then
-  printf "\t\t%s\t%s" "$benchmarkName" "$out" >> "$OUT_FILE"
-    fi
+    printf "\t\t%s\t%s" "$benchmarkName" "$out" >> "$OUT_FILE"
+  else
+    echo "failed (output: $out)"
+  fi
 done
 
 echo >> "$OUT_FILE"

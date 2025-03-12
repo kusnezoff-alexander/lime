@@ -1,50 +1,36 @@
 use super::{
-    Architecture, BitwiseOperand, BitwiseRow, Program, ProgramState, Row, SingleRowAddress,
+    optimization::optimize, Address, Architecture, BitwiseOperand, Program, ProgramState,
+    SingleRowAddress,
 };
-use crate::ambit::optimization::optimize;
 use eggmock::{Id, MigNode, Node, ProviderWithBackwardEdges, Signal};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 pub fn compile<'a>(
     architecture: &'a Architecture,
     network: &impl ProviderWithBackwardEdges<Node = MigNode>,
 ) -> Program<'a> {
+    let outputs = network
+        .outputs()
+        .enumerate()
+        .map(|(id, sig)| (sig.node_id(), (id as u64, sig)))
+        .collect::<FxHashMap<Id, (u64, Signal)>>();
     let mut state = CompilationState::new(architecture, network);
     while let Some((id, node)) = state.candidates.iter().next() {
-        state.compute(*id, *node)
-    }
-
-    let mut free_dcc = None;
-    let mut free_dcc_i = None;
-    for (i, output) in network.outputs().enumerate() {
-        let dcc_row = state
-            .program
-            .rows()
-            .get_rows(output)
-            .find_map(|row| match row {
-                Row::Bitwise(BitwiseRow::DCC(dcc)) => Some(dcc),
-                _ => None,
-            });
-        if let Some(dcc_row) = dcc_row {
-            free_dcc = Some(dcc_row);
-            free_dcc_i = Some(i);
-            state
-                .program
-                .signal_copy(output, SingleRowAddress::Out(i as u64), dcc_row);
+        if let Some((output, signal)) = outputs.get(id) {
+            if signal.is_inverted() {
+                state.compute(*id, *node, None);
+                state.program.signal_copy(
+                    *signal,
+                    SingleRowAddress::Out(*output),
+                    state.program.rows().get_free_dcc().unwrap_or(0),
+                );
+            } else {
+                state.compute(*id, *node, Some(Address::Out(*output)));
+            }
+        } else {
+            state.compute(*id, *node, None);
         }
     }
-    let free_dcc = free_dcc.unwrap_or(0);
-
-    for (i, output) in network.outputs().enumerate() {
-        if free_dcc_i == Some(i) {
-            // already copied in the previous loop
-            continue;
-        }
-        state
-            .program
-            .signal_copy(output, SingleRowAddress::Out(i as u64), free_dcc);
-    }
-
     let mut program = state.program.into();
     optimize(&mut program);
     program
@@ -81,7 +67,7 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
         }
     }
 
-    pub fn compute(&mut self, id: Id, node: MigNode) {
+    pub fn compute(&mut self, id: Id, node: MigNode, out_address: Option<Address>) {
         if !self.candidates.remove(&(id, node)) {
             panic!("not a candidate");
         }
@@ -135,7 +121,8 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
         }
 
         // all signals are in place, now we can perform the MAJ operation
-        self.program.maj(maj_id, Signal::new(id, false));
+        self.program
+            .maj(maj_id, Signal::new(id, false), out_address);
 
         // lastly, determine new candidates
         for parent_id in self.network.node_outputs(id) {

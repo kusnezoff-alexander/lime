@@ -1,4 +1,4 @@
-use super::{BitwiseOperand, SingleRowAddress};
+use super::{Architecture, BitwiseOperand, SingleRowAddress};
 use eggmock::{Id, MigNode, ProviderWithBackwardEdges, Signal};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
@@ -23,19 +23,24 @@ pub enum BitwiseRow {
 
 /// Contains a snapshot state of the rows in an Ambit-like DRAM
 #[derive(Debug, Clone)]
-pub struct Rows {
+pub struct Rows<'a> {
     signals: FxHashMap<Signal, Vec<Row>>,
     rows: FxHashMap<Row, Signal>,
     spill_counter: u32,
+    architecture: &'a Architecture,
 }
 
-impl Rows {
+impl<'a> Rows<'a> {
     /// Initializes the rows with the leaf values in the given network.
-    pub fn new(ntk: &impl ProviderWithBackwardEdges<Node = MigNode>) -> Self {
+    pub fn new(
+        ntk: &impl ProviderWithBackwardEdges<Node = MigNode>,
+        architecture: &'a Architecture,
+    ) -> Self {
         let mut rows = Rows {
             signals: FxHashMap::default(),
             rows: FxHashMap::default(),
             spill_counter: 0,
+            architecture,
         };
         rows.add_leafs(ntk);
         rows
@@ -58,6 +63,15 @@ impl Rows {
                 _ => unreachable!("leaf node should be either an input or a constant"),
             };
         }
+    }
+
+    pub fn get_free_dcc(&self) -> Option<u8> {
+        for i in 0..self.architecture.num_dcc {
+            if self.rows.get(&Row::Bitwise(BitwiseRow::DCC(i))).is_none() {
+                return Some(i);
+            }
+        }
+        None
     }
 
     /// Returns the current signal of the given row.
@@ -104,11 +118,7 @@ impl Rows {
     /// but inverted iff the operand is inverted.
     ///
     /// Returns the signal of the operand previous to this operation if it was changed.
-    pub fn set_signal(
-        &mut self,
-        address: SingleRowAddress,
-        signal: Signal,
-    ) -> Option<Signal> {
+    pub fn set_signal(&mut self, address: SingleRowAddress, signal: Signal) -> Option<Signal> {
         self.set_row_signal(address.row(), signal.maybe_invert(address.inverted()))?
             .maybe_invert(address.inverted())
             .into()

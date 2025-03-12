@@ -110,7 +110,7 @@ def visualize(rows, file_prefix, benchmarks):
         x = np.arange(len(benchmarks))
 
         fig, ax = plt.subplots(layout="constrained")
-        fig.set_size_inches(10, 5)
+        fig.set_size_inches(len(benchmarks), 5)
         ax.set_xticks(x + len(rows) * width / 2, benchmarks)
         ax.set_title(col)
 
