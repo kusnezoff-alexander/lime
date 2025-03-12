@@ -2,6 +2,7 @@ use super::{
     optimization::optimize, Address, Architecture, BitwiseOperand, Program, ProgramState,
     SingleRowAddress,
 };
+use crate::ambit::rows::Row;
 use eggmock::{Id, MigNode, Node, ProviderWithBackwardEdges, Signal};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -9,26 +10,26 @@ pub fn compile<'a>(
     architecture: &'a Architecture,
     network: &impl ProviderWithBackwardEdges<Node = MigNode>,
 ) -> Program<'a> {
-    let outputs = network
-        .outputs()
-        .enumerate()
-        .map(|(id, sig)| (sig.node_id(), (id as u64, sig)))
-        .collect::<FxHashMap<Id, (u64, Signal)>>();
     let mut state = CompilationState::new(architecture, network);
-    while let Some((id, node)) = state.candidates.iter().next() {
-        if let Some((output, signal)) = outputs.get(id) {
+    while let Some((id, node)) = state.candidates.iter().next().copied() {
+        let output = state.outputs.get(&id).copied();
+        if let Some((output, signal)) = output {
             if signal.is_inverted() {
-                state.compute(*id, *node, None);
+                state.compute(id, node, None);
                 state.program.signal_copy(
-                    *signal,
-                    SingleRowAddress::Out(*output),
+                    signal,
+                    SingleRowAddress::Out(output),
                     state.program.rows().get_free_dcc().unwrap_or(0),
                 );
             } else {
-                state.compute(*id, *node, Some(Address::Out(*output)));
+                state.compute(id, node, Some(Address::Out(output)));
+            }
+            let leftover_uses = *state.leftover_use_count(id);
+            if leftover_uses == 1 {
+                state.program.free_id_rows(id);
             }
         } else {
-            state.compute(*id, *node, None);
+            state.compute(id, node, None);
         }
     }
     let mut program = state.program.into();
@@ -40,6 +41,9 @@ pub struct CompilationState<'a, 'n, P> {
     network: &'n P,
     candidates: FxHashSet<(Id, MigNode)>,
     program: ProgramState<'a>,
+
+    outputs: FxHashMap<Id, (u64, Signal)>,
+    leftover_use_count: FxHashMap<Id, usize>,
 }
 
 impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 'n, P> {
@@ -60,11 +64,26 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
             }
         }
         let program = ProgramState::new(architecture, network);
+
+        let outputs = network
+            .outputs()
+            .enumerate()
+            .map(|(id, sig)| (sig.node_id(), (id as u64, sig)))
+            .collect();
+
         Self {
             network,
             candidates,
             program,
+            outputs,
+            leftover_use_count: FxHashMap::default(),
         }
+    }
+
+    pub fn leftover_use_count(&mut self, id: Id) -> &mut usize {
+        self.leftover_use_count.entry(id).or_insert_with(|| {
+            self.network.node_outputs(id).count() + self.outputs.contains_key(&id) as usize
+        })
     }
 
     pub fn compute(&mut self, id: Id, node: MigNode, out_address: Option<Address>) {
@@ -85,7 +104,8 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
                 .expect("maj has to have 3 operands");
             let (matches, match_no) = self.get_mapping(&mut signals, operands);
             let dcc_cost = self.optimize_dcc_usage(&mut signals, operands, &matches);
-            let cost = 3 - match_no + dcc_cost;
+            let spilling_cost = self.spilling_cost(operands, &matches);
+            let cost = 3.0 - match_no as f32 + dcc_cost as f32 + 0.5 * spilling_cost as f32;
             let is_opt = match &opt {
                 None => true,
                 Some((opt_no, _, _, _)) => *opt_no > cost,
@@ -124,6 +144,22 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
         self.program
             .maj(maj_id, Signal::new(id, false), out_address);
 
+        // free up rows if possible
+        // (1) for the MAJ-signal
+        if *self.leftover_use_count(id) == 0 {
+            self.program.free_id_rows(id);
+        }
+        // (2) for the input signals
+        'outer: for i in 0..3 {
+            // decrease use count only once per id
+            for j in 0..i {
+                if signals[i].node_id() == signals[j].node_id() {
+                    continue 'outer;
+                }
+            }
+            *self.leftover_use_count(signals[i].node_id()) -= 1
+        }
+
         // lastly, determine new candidates
         for parent_id in self.network.node_outputs(id) {
             let parent_node = self.network.node(parent_id);
@@ -142,7 +178,7 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
         signals: &mut [Signal; 3],
         operands: &[BitwiseOperand; 3],
         matching: &[bool; 3],
-    ) -> usize {
+    ) -> i32 {
         // first, try using a DCC row for all non-matching rows that require inversion
         let mut dcc_adjusted = [false; 3];
         let mut changed = true;
@@ -180,6 +216,35 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
             if self.program.rows().get_rows(*signal).next().is_none() {
                 cost += 1
             }
+        }
+        cost
+    }
+
+    fn spilling_cost(&self, operands: &[BitwiseOperand; 3], matching: &[bool; 3]) -> i32 {
+        let mut cost = 0;
+        for i in 0..3 {
+            if matching[i] {
+                continue;
+            }
+            let Some(_signal) = self
+                .program
+                .rows()
+                .get_row_signal(Row::Bitwise(operands[i].row()))
+            else {
+                continue;
+            };
+            cost += 1
+            // // signal and inverted signal not present somewhere else
+            // if self.program.rows().get_rows(signal).count() < 2
+            //     && self
+            //         .program
+            //         .rows()
+            //         .get_rows(signal.invert())
+            //         .next()
+            //         .is_none()
+            // {
+            //     cost += 1
+            // }
         }
         cost
     }

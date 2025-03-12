@@ -162,6 +162,19 @@ impl<'a> Rows<'a> {
 
         prev
     }
+
+    pub fn free_id_rows(&mut self, id: Id) {
+        let non_inv = Signal::new(id, false);
+        let inv = Signal::new(id, true);
+        for sig in [non_inv, inv] {
+            let Some(rows) = self.signals.remove(&sig) else {
+                continue
+            };
+            for row in rows {
+                self.rows.remove(&row);
+            }
+        }
+    }
 }
 
 impl From<BitwiseRow> for Row {

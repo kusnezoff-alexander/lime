@@ -1,5 +1,5 @@
 use super::{Architecture, BitwiseOperand, BitwiseRow, Row, Rows};
-use eggmock::{MigNode, ProviderWithBackwardEdges, Signal};
+use eggmock::{Id, MigNode, ProviderWithBackwardEdges, Signal};
 use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut};
 
@@ -227,6 +227,10 @@ impl<'a> ProgramState<'a> {
                     .push(Instruction::AAP(address.into(), Address::Spill(spill_id)));
             }
         }
+    }
+
+    pub fn free_id_rows(&mut self, id: Id) {
+        self.rows.free_id_rows(id);
     }
 
     pub fn rows(&self) -> &Rows {

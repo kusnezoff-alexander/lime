@@ -23,7 +23,7 @@ int main()
 
   write_dot( in, "in.dot" );
 
-  ambit_compile_result result = eggmock::send_mig( in, ambit_compile( ambit_compiler_settings{
+  ambit_compiler_statistics result = eggmock::send_mig( in, ambit_compile( ambit_compiler_settings{
                                                            .print_program = true,
                                                            .verbose = true,
                                                        } ) );
