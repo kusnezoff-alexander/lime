@@ -11,7 +11,16 @@ pub fn compile<'a>(
     network: &impl ProviderWithBackwardEdges<Node = MigNode>,
 ) -> Program<'a> {
     let mut state = CompilationState::new(architecture, network);
-    while let Some((id, node)) = state.candidates.iter().next().copied() {
+    while !state.candidates.is_empty() {
+        let mut iter = state.candidates.iter().copied();
+        let (mut id, mut node) = iter.next().unwrap();
+        let mut min_outputs = state.network.node_outputs(id).count();
+        for (cand_id, cand_node) in iter {
+            let outputs = state.network.node_outputs(cand_id).count();
+            if outputs < min_outputs {
+                (id, node, min_outputs) = (cand_id, cand_node, outputs)
+            }
+        }
         let output = state.outputs.get(&id).copied();
         if let Some((output, signal)) = output {
             if signal.is_inverted() {
