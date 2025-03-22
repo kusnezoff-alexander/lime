@@ -5,22 +5,39 @@ use super::{
 use crate::ambit::rows::Row;
 use eggmock::{Id, Mig, Node, ProviderWithBackwardEdges, Signal};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::cmp::max;
 
 pub fn compile<'a>(
     architecture: &'a Architecture,
     network: &impl ProviderWithBackwardEdges<Node = Mig>,
 ) -> Program<'a> {
     let mut state = CompilationState::new(architecture, network);
+    let mut max_cand_size = 0;
     while !state.candidates.is_empty() {
-        let mut iter = state.candidates.iter().copied();
-        let (mut id, mut node) = iter.next().unwrap();
-        let mut min_outputs = state.network.node_outputs(id).count();
-        for (cand_id, cand_node) in iter {
-            let outputs = state.network.node_outputs(cand_id).count();
-            if outputs < min_outputs {
-                (id, node, min_outputs) = (cand_id, cand_node, outputs)
-            }
-        }
+        max_cand_size = max(max_cand_size, state.candidates.len());
+        let (id, node, _, _, _) = state
+            .candidates
+            .iter()
+            .copied()
+            .map(|(id, node)| {
+                let outputs = state.network.node_outputs(id).count();
+                let output = state.network.outputs().any(|out| out.node_id() == id);
+                let not_present = node
+                    .inputs()
+                    .iter()
+                    .map(|signal| {
+                        let present = state
+                            .program
+                            .rows()
+                            .get_rows(*signal)
+                            .any(|row| matches!(row, Row::Bitwise(_)));
+                        !present as u8
+                    })
+                    .sum::<u8>();
+                (id, node, not_present, outputs, output)
+            })
+            .min_by_key(|(_, _, not_present, outputs, output)| (*not_present, *outputs, !output))
+            .unwrap();
         let output = state.outputs.get(&id).copied();
         if let Some((output, signal)) = output {
             if signal.is_inverted() {

@@ -126,6 +126,7 @@ def visualize(rows, file_prefix, benchmarks):
             ax.bar(x + width * multiplier, values, width, label=row["description"], align="edge")
             multiplier += 1
 
+        ax.axhline(color='black', linewidth=0.5)
         plt.legend()
         plt.savefig("vis/" + file_prefix + "_" + col + ".png", bbox_inches="tight")
         plt.close()
@@ -134,8 +135,9 @@ for i, groupedRows in enumerate(grouped):
     visualize(groupedRows, str(i), groupBenchmarks[i])
 
 # Now normalize rows
-for row in rows:
+for row in rows[1:]:
     for benchmark, metrics in row["results"].items():
         for metric, value in metrics.items():
-            metrics[metric] = 0 if value == 0 else value / maxMetrics[metric][benchmark]
-visualize(rows, "norm", benchmarks)
+            baseline = rows[0]["results"][benchmark][metric]
+            metrics[metric] = 0 if value == 0 or baseline == 0 else (baseline - value) / baseline
+visualize(rows[1:], "rel_diff", benchmarks)
