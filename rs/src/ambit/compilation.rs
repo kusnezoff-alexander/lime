@@ -3,12 +3,12 @@ use super::{
     SingleRowAddress,
 };
 use crate::ambit::rows::Row;
-use eggmock::{Id, MigNode, Node, ProviderWithBackwardEdges, Signal};
+use eggmock::{Id, Mig, Node, ProviderWithBackwardEdges, Signal};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub fn compile<'a>(
     architecture: &'a Architecture,
-    network: &impl ProviderWithBackwardEdges<Node = MigNode>,
+    network: &impl ProviderWithBackwardEdges<Node = Mig>,
 ) -> Program<'a> {
     let mut state = CompilationState::new(architecture, network);
     while !state.candidates.is_empty() {
@@ -48,14 +48,14 @@ pub fn compile<'a>(
 
 pub struct CompilationState<'a, 'n, P> {
     network: &'n P,
-    candidates: FxHashSet<(Id, MigNode)>,
+    candidates: FxHashSet<(Id, Mig)>,
     program: ProgramState<'a>,
 
     outputs: FxHashMap<Id, (u64, Signal)>,
     leftover_use_count: FxHashMap<Id, usize>,
 }
 
-impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 'n, P> {
+impl<'a, 'n, P: ProviderWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, P> {
     pub fn new(architecture: &'a Architecture, network: &'n P) -> Self {
         let mut candidates = FxHashSet::default();
         // check all parents of leafs whether they have only leaf children, in which case they are
@@ -95,11 +95,11 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = MigNode>> CompilationState<'a, 
         })
     }
 
-    pub fn compute(&mut self, id: Id, node: MigNode, out_address: Option<Address>) {
+    pub fn compute(&mut self, id: Id, node: Mig, out_address: Option<Address>) {
         if !self.candidates.remove(&(id, node)) {
             panic!("not a candidate");
         }
-        let MigNode::Maj(mut signals) = node else {
+        let Mig::Maj(mut signals) = node else {
             panic!("can only compute majs")
         };
 

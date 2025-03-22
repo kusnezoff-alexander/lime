@@ -12,7 +12,7 @@ use self::extraction::CompilingCostFunction;
 
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
 use eggmock::{
-    Mig, MigLanguage, MigNode, MigReceiverFFI, Provider, Receiver, ReceiverFFI, Rewriter,
+    Mig, MigLanguage, MigReceiverFFI, Provider, Receiver, ReceiverFFI, Rewriter,
     RewriterFFI,
 };
 use program::*;
@@ -146,7 +146,7 @@ fn compiling_receiver<'a>(
     architecture: &'a Architecture,
     rules: &'a [Rewrite<MigLanguage, ()>],
     settings: CompilerSettings,
-) -> impl Receiver<Result = CompilingReceiverResult<'a>, Node = MigNode> + 'a {
+) -> impl Receiver<Result = CompilingReceiverResult<'a>, Node = Mig> + 'a {
     EGraph::<MigLanguage, _>::new(()).map(move |(graph, outputs)| {
         let t_runner = std::time::Instant::now();
         let runner = Runner::default().with_egraph(graph).run(rules);
@@ -211,19 +211,19 @@ struct CompilerSettings {
 struct AmbitRewriter(CompilerSettings);
 
 impl Rewriter for AmbitRewriter {
-    type Network = Mig;
+    type Node = Mig;
     type Intermediate = CompilingReceiverResult<'static>;
 
     fn create_receiver(
         &mut self,
-    ) -> impl Receiver<Node = MigNode, Result = CompilingReceiverResult<'static>> + 'static {
+    ) -> impl Receiver<Node = Mig, Result = CompilingReceiverResult<'static>> + 'static {
         compiling_receiver(&*ARCHITECTURE, REWRITE_RULES.as_slice(), self.0)
     }
 
     fn rewrite(
         self,
         result: CompilingReceiverResult<'static>,
-        output: impl Receiver<Node = MigNode, Result = ()>,
+        output: impl Receiver<Node = Mig, Result = ()>,
     ) {
         result.output.borrow_ntk().send(output);
     }

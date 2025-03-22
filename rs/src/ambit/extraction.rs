@@ -1,5 +1,5 @@
 use eggmock::egg::{CostFunction, Id};
-use eggmock::{EggIdToSignal, MigLanguage, MigNode, NetworkLanguage, Provider, Signal};
+use eggmock::{EggIdToSignal, MigLanguage, Mig, NetworkLanguage, Provider, Signal};
 use either::Either;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -173,7 +173,7 @@ impl Index<Id> for StackedPartialGraph {
 }
 
 impl Provider for StackedPartialGraph {
-    type Node = MigNode;
+    type Node = Mig;
 
     fn outputs(&self) -> impl Iterator<Item=Signal> {
         iter::once(self.to_signal(self.get_root_id()))
