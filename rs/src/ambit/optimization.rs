@@ -161,6 +161,7 @@ impl Optimization<'_, '_> {
                 continue;
             };
             let mut operands = self.program.architecture.multi_activations[mult_i].clone();
+            let mut used_rows = FxHashSet::default();
             for candidate_i in i + 1..instructions.len() {
                 if operands.is_empty() {
                     break;
@@ -170,7 +171,11 @@ impl Optimization<'_, '_> {
                 if let Instruction::AAP(Address::Bitwise(BitwiseAddress::Single(operand)), target) =
                     candidate
                 {
-                    if operands.contains(&operand) {
+                    if target
+                        .row_addresses(self.program.architecture)
+                        .any(|addr| used_rows.contains(&addr.row()))
+                        && operands.contains(&operand)
+                    {
                         instructions[i] = Instruction::AAP(address, target);
                         instructions.remove(candidate_i);
                         i += 1;
@@ -178,6 +183,11 @@ impl Optimization<'_, '_> {
                     }
                 }
 
+                used_rows.extend(
+                    candidate
+                        .used_addresses(self.program.architecture)
+                        .map(|add| add.row()),
+                );
                 for row in candidate.overridden_rows(self.program.architecture) {
                     let mut i = 0;
                     while i < operands.len() {
