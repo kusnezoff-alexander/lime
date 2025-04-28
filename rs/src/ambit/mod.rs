@@ -264,3 +264,21 @@ extern "C" fn ambit_compile(settings: CompilerSettings) -> MigReceiverFFI<Compil
         });
     MigReceiverFFI::new(receiver)
 }
+
+#[no_mangle]
+extern "C" fn fcdram_compile(settings: CompilerSettings) -> MigReceiverFFI<CompilerStatistics> {
+    let receiver =
+        compiling_receiver(&*&ARCHITECTURE, REWRITE_RULES.as_slice(), settings).map(|res| {
+            let graph = res.output.borrow_graph();
+            CompilerStatistics {
+                egraph_classes: graph.number_of_classes() as u64,
+                egraph_nodes: graph.total_number_of_nodes() as u64,
+                egraph_size: graph.total_size() as u64,
+                instruction_count: res.output.borrow_program().instructions.len() as u64,
+                t_runner: res.t_runner as u64,
+                t_extractor: res.t_extractor as u64,
+                t_compiler: res.t_compiler as u64,
+            }
+        });
+    MigReceiverFFI::new(receiver)
+}
