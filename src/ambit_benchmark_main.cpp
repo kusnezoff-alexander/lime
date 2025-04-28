@@ -31,7 +31,6 @@ int main( int const argc, char** argv )
   preoptimize_mig( *mig );
   auto const t_opt = duration_cast<milliseconds>( system_clock::now() - opt_begin ).count();
 
-
   auto constexpr settings = ambit_compiler_settings{
       .print_program = false,
       .verbose = false,
