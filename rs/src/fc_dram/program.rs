@@ -9,19 +9,18 @@ use std::ops::{Deref, DerefMut};
 
 
 #[derive(Debug, Clone)]
-pub struct Program<'a> {
-    pub architecture: &'a A,
+pub struct Program {
     pub instructions: Vec<Instruction>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ProgramState<'a> {
-    program: Program<'a, A>,
+pub struct ProgramState {
+    program: Program,
     /// currently used rows
     rows: Vec<RowAddress>,
 }
 
-impl<'a> Program<'a, A> {
+impl Program {
     pub fn new(instructions: Vec<Instruction>) -> Self {
         Self {
             instructions,
@@ -29,7 +28,7 @@ impl<'a> Program<'a, A> {
     }
 }
 
-impl<'a> ProgramState<'a> {
+impl ProgramState {
     pub fn new(
         network: &impl ProviderWithBackwardEdges<Node = Mig>,
     ) -> Self {
@@ -63,28 +62,28 @@ impl<'a> ProgramState<'a> {
     }
 }
 
-impl<'a> Deref for ProgramState<'a> {
-    type Target = Program<'a, A>;
+impl Deref for ProgramState {
+    type Target = Program;
 
     fn deref(&self) -> &Self::Target {
         &self.program
     }
 }
 
-impl<A> DerefMut for ProgramState<'_,> {
+impl DerefMut for ProgramState {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.program
     }
 }
 
-impl<'a> From<ProgramState<'a>> for Program<'a> {
-    fn from(value: ProgramState<'a, A>) -> Self {
+impl From<ProgramState> for Program {
+    fn from(value: ProgramState) -> Self {
         value.program
     }
 }
 
 /// Print the generated program in human-readable form
-impl DRAMArchitecture> Display for Program<'_> {
+impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         todo!()
     }

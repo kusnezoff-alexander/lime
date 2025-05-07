@@ -10,9 +10,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::max;
 
 /// Compiles given `network` to a program that can be run on given `architecture`
-pub fn compile<'a>(
+pub fn compile(
     network: &impl ProviderWithBackwardEdges<Node = Mig>,
-) -> Program<'a, A> {
+) -> Program {
+    todo!()
     // let mut state = CompilationState::new(architecture, network);
     // let mut max_cand_size = 0; // TODO: unused?
     // while !state.candidates.is_empty() {
@@ -65,17 +66,17 @@ pub fn compile<'a>(
     // program
 }
 
-pub struct CompilationState<'a, 'n, P> {
+pub struct CompilationState<'n, P> {
     /// Network (P=Provider, obsolte naming)
     network: &'n P,
     candidates: FxHashSet<(Id, Mig)>, // TODO: probably change to `Aig` ?
-    program: ProgramState<'a>,
+    program: ProgramState,
 
     outputs: FxHashMap<Id, (u64, Signal)>,
     leftover_use_count: FxHashMap<Id, usize>,
 }
 
-impl<'a, 'n, P: ProviderWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, P> {
+impl<'n, P: ProviderWithBackwardEdges<Node = Mig>> CompilationState<'n, P> {
     pub fn new(network: &'n P) -> Self {
         let mut candidates = FxHashSet::default();
         // check all parents of leaves whether they have only leaf children, in which case they are
@@ -128,54 +129,55 @@ impl<'a, 'n, P: ProviderWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, 
         signals: &mut [Signal; 3],
         operands: &[RowAddress; 3],
     ) -> ([bool; 3], usize) {
-        let signals_with_idx = {
-            let mut i = 0;
-            signals.map(|signal| {
-                i += 1;
-                (signal, i - 1)
-            })
-        };
-        let operand_signals = operands.map(|op| self.program.rows().get_operand_signal(op));
-
-        // reorder signals by how often their signal is already available in an operand
-        let mut signals_with_matches = signals_with_idx.map(|(s, i)| {
-            (
-                s,
-                i,
-                operand_signals
-                    .iter()
-                    .filter(|sig| **sig == Some(s))
-                    .count(),
-            )
-        });
-        signals_with_matches.sort_by(|a, b| a.2.cmp(&b.2));
-
-        // then we can assign places one by one and get an optimal mapping (probably, proof by
-        // intuition only)
-
-        // contains for each operand index whether the signal at that position is already the
-        // correct one
-        let mut result = [false; 3];
-        // contains the mapping of old signal index to operand index
-        let mut new_positions = [0usize, 1, 2];
-        // contains the number of assigned signals (i.e. #true in result)
-        let mut assigned_signals = 0;
-
-        for (signal, signal_idx, _) in signals_with_matches {
-            // find operand index for that signal
-            let Some((target_idx, _)) = operand_signals
-                .iter()
-                .enumerate()
-                .find(|(idx, sig)| **sig == Some(signal) && !result[*idx])
-            else {
-                continue;
-            };
-            result[target_idx] = true;
-            let new_idx = new_positions[signal_idx];
-            signals.swap(target_idx, new_idx);
-            new_positions.swap(target_idx, new_idx);
-            assigned_signals += 1;
-        }
-        (result, assigned_signals)
+        todo!()
+        // let signals_with_idx = {
+        //     let mut i = 0;
+        //     signals.map(|signal| {
+        //         i += 1;
+        //         (signal, i - 1)
+        //     })
+        // };
+        // let operand_signals = operands.map(|op| self.program.rows().get_operand_signal(op));
+        //
+        // // reorder signals by how often their signal is already available in an operand
+        // let mut signals_with_matches = signals_with_idx.map(|(s, i)| {
+        //     (
+        //         s,
+        //         i,
+        //         operand_signals
+        //             .iter()
+        //             .filter(|sig| **sig == Some(s))
+        //             .count(),
+        //     )
+        // });
+        // signals_with_matches.sort_by(|a, b| a.2.cmp(&b.2));
+        //
+        // // then we can assign places one by one and get an optimal mapping (probably, proof by
+        // // intuition only)
+        //
+        // // contains for each operand index whether the signal at that position is already the
+        // // correct one
+        // let mut result = [false; 3];
+        // // contains the mapping of old signal index to operand index
+        // let mut new_positions = [0usize, 1, 2];
+        // // contains the number of assigned signals (i.e. #true in result)
+        // let mut assigned_signals = 0;
+        //
+        // for (signal, signal_idx, _) in signals_with_matches {
+        //     // find operand index for that signal
+        //     let Some((target_idx, _)) = operand_signals
+        //         .iter()
+        //         .enumerate()
+        //         .find(|(idx, sig)| **sig == Some(signal) && !result[*idx])
+        //     else {
+        //         continue;
+        //     };
+        //     result[target_idx] = true;
+        //     let new_idx = new_positions[signal_idx];
+        //     signals.swap(target_idx, new_idx);
+        //     new_positions.swap(target_idx, new_idx);
+        //     assigned_signals += 1;
+        // }
+        // (result, assigned_signals)
     }
 }

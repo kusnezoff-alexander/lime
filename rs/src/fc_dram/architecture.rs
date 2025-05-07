@@ -81,9 +81,10 @@ impl Instruction {
     /// Return Addreses of Rows which are used by this instruction (=operand-rows AND result-row)
     /// - REMINDER: although only two row-operands are given to `APA`, more rows can be/are affected due to *Simultaneous Row Activation* (see [3])
     /// TODO
-    pub fn used_addresses<'a>(
+    pub fn used_addresses(
         &self,
-    ) -> impl Iterator<Item = RowAddress> + 'a {
+    ) -> Vec <RowAddress> {
+    // ) -> impl Iterator<Item = RowAddress> {
         todo!()
         // let from = match self {
         //     Instruction::AAP(from, _) => from,
@@ -103,7 +104,8 @@ impl Instruction {
     /// TODO
     pub fn overridden_rows<'a>(
         &self,
-    ) -> impl Iterator<Item = RowAddress> + 'a {
+    ) -> Vec <RowAddress> {
+    // ) -> impl Iterator<Item = RowAddress> {
         todo!()
     }
 }

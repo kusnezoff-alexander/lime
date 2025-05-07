@@ -1,3 +1,4 @@
+//! Some manual optimizations (LOWEST PRIORITY)
 use crate::fc_dram::architecture::{RowAddress, Instruction};
 use rustc_hash::FxHashSet;
 
@@ -11,12 +12,12 @@ pub fn optimize(program: &mut Program) {
     // TODO: perform optimizations !
 }
 
-pub struct Optimization<'p, 'a> {
-    program: &'p mut Program<'a>,
+pub struct Optimization<'p> {
+    program: &'p mut Program,
 }
 
 // TODO: manual optimizations?
-impl Optimization<'_, '_,> {
+impl Optimization<'_> {
     /// TODO: perform some basic compiler-optimization like dead_code_elimination? or will this
     /// already be done by the MLIR dialect?
     fn dead_code_elimination(&mut self) {

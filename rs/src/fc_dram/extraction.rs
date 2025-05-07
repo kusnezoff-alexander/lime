@@ -12,60 +12,18 @@ use std::rc::Rc;
 use super::architecture::FCDRAMArchitecture;
 use super::compile;
 
-pub struct CompilingCostFunction<'a> {}
+pub struct CompilingCostFunction{}
 
-impl StackedPartialGraph {
-    pub fn leaf(node: MigLanguage) -> Self {
-        Self {
-            nodes: Vec::new(),
-            first_free_id: 0,
-            root: node,
-        }
-    }
-
-    pub fn new(
-        root: MigLanguage,
-        child_graphs: impl IntoIterator<Item=Rc<CollapsedPartialGraph>>,
-    ) -> Self {
-        let mut nodes = Vec::new();
-        let mut first_free_id = 0;
-        for graph in child_graphs {
-            nodes.push(graph.nodes.clone());
-            first_free_id = max(first_free_id, graph.first_free_id);
-        }
-        Self {
-            nodes,
-            first_free_id,
-            root,
-        }
-    }
-
-    pub fn collapse(&self, real_id: Id) -> CollapsedPartialGraph {
-        let mut nodes: FxHashMap<Id, MigLanguage> = FxHashMap::default();
-        let first_free_id = max(self.first_free_id, usize::from(real_id));
-        nodes.extend(
-            self.nodes
-                .iter()
-                .flat_map(|map| map.iter().map(|(id, node)| (*id, node.clone()))),
-        );
-        nodes.insert(real_id, self.root.clone());
-        CollapsedPartialGraph {
-            nodes: Rc::new(nodes),
-            first_free_id,
-            root_id: real_id,
-        }
-    }
-}
+// impl StackedPartialGraph { } // Do I need this??
 
 /// TODO: add reliability as cost-metric
 #[derive(Debug)]
 pub struct CompilingCost {
-    partial: RefCell<Either<StackedPartialGraph, Rc<CollapsedPartialGraph>>>,
-    not_nesting: NotNesting,
+    // partial: RefCell<Either<StackedPartialGraph, Rc<CollapsedPartialGraph>>>,
     program_cost: usize,
 }
 
-impl CostFunction<MigLanguage> for CompilingCostFunction<'_, A> {
+impl CostFunction<MigLanguage> for CompilingCostFunction {
     type Cost = Rc<CompilingCost>;
 
     /// Compute cost of given `enode`
@@ -101,8 +59,7 @@ impl CostFunction<MigLanguage> for CompilingCostFunction<'_, A> {
 impl CompilingCost {
     pub fn leaf(root: MigLanguage) -> Self {
         Self {
-            partial: RefCell::new(Either::Left(StackedPartialGraph::leaf(root))),
-            not_nesting: NotNesting::NotANot,
+            // partial: RefCell::new(Either::Left(StackedPartialGraph::leaf(root))),
             program_cost: 0,
         }
     }
@@ -126,63 +83,65 @@ impl CompilingCost {
 
 }
 
-impl StackedPartialGraph {
-    pub fn get_root_id(&self) -> Id {
-        Id::from(self.first_free_id + 1)
-    }
-}
-
-impl Index<Id> for StackedPartialGraph {
-    type Output = MigLanguage;
-
-    fn index(&self, index: Id) -> &Self::Output {
-        if index == self.get_root_id() {
-            &self.root
-        } else {
-            self.nodes.iter().filter_map(|m| m.get(&index)).next().unwrap()
-        }
-    }
-}
-
-impl Provider for StackedPartialGraph {
-    type Node = Mig;
-
-    fn outputs(&self) -> impl Iterator<Item=Signal> {
-        iter::once(self.to_signal(self.get_root_id()))
-    }
-
-    fn node(&self, id: eggmock::Id) -> Self::Node {
-        self[Id::from(id)]
-            .to_node(|id| self.to_signal(id))
-            .expect("id should point to a non-not node")
-    }
-}
+// impl StackedPartialGraph {
+//     pub fn get_root_id(&self) -> Id {
+//         Id::from(self.first_free_id + 1)
+//     }
+// }
+//
+// impl Index<Id> for StackedPartialGraph {
+//     type Output = MigLanguage;
+//
+//     fn index(&self, index: Id) -> &Self::Output {
+//         if index == self.get_root_id() {
+//             &self.root
+//         } else {
+//             self.nodes.iter().filter_map(|m| m.get(&index)).next().unwrap()
+//         }
+//     }
+// }
+//
+// impl Provider for StackedPartialGraph {
+//     type Node = Mig;
+//
+//     fn outputs(&self) -> impl Iterator<Item=Signal> {
+//         iter::once(self.to_signal(self.get_root_id()))
+//     }
+//
+//     fn node(&self, id: eggmock::Id) -> Self::Node {
+//         self[Id::from(id)]
+//             .to_node(|id| self.to_signal(id))
+//             .expect("id should point to a non-not node")
+//     }
+// }
 
 impl PartialEq for CompilingCost {
     fn eq(&self, other: &Self) -> bool {
-        if other.not_nesting == NotNesting::NestedNots && self.not_nesting == NotNesting::NestedNots {
-            true
-        } else {
-            self.program_cost.eq(&other.program_cost)
-        }
+        todo!()
+        // if other.not_nesting == NotNesting::NestedNots && self.not_nesting == NotNesting::NestedNots {
+        //     true
+        // } else {
+        //     self.program_cost.eq(&other.program_cost)
+        // }
     }
 }
 
 impl PartialOrd for CompilingCost {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        #[allow(clippy::collapsible_else_if)]
-        if self.not_nesting == NotNesting::NestedNots {
-            if other.not_nesting == NotNesting::NestedNots {
-                Some(Ordering::Equal)
-            } else {
-                Some(Ordering::Greater)
-            }
-        } else {
-            if other.not_nesting == NotNesting::NestedNots {
-                Some(Ordering::Less)
-            } else {
-                self.program_cost.partial_cmp(&other.program_cost)
-            }
-        }
+        todo!()
+        // #[allow(clippy::collapsible_else_if)]
+        // if self.not_nesting == NotNesting::NestedNots {
+        //     if other.not_nesting == NotNesting::NestedNots {
+        //         Some(Ordering::Equal)
+        //     } else {
+        //         Some(Ordering::Greater)
+        //     }
+        // } else {
+        //     if other.not_nesting == NotNesting::NestedNots {
+        //         Some(Ordering::Less)
+        //     } else {
+        //         self.program_cost.partial_cmp(&other.program_cost)
+        //     }
+        // }
     }
 }
