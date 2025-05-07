@@ -9,33 +9,10 @@ use std::cmp::{max, Ordering};
 use std::iter;
 use std::ops::{Deref, Index};
 use std::rc::Rc;
-use super::{compile, Architecture};
+use super::architecture::FCDRAMArchitecture;
+use super::compile;
 
-pub struct CompilingCostFunction<'a> {
-    pub architecture: &'a Architecture
-}
-
-#[derive(Debug, Default, Eq, PartialEq)]
-pub enum NotNesting {
-    #[default]
-    NotANot,
-    FirstNot,
-    NestedNots,
-}
-
-#[derive(Debug)]
-pub struct StackedPartialGraph {
-    nodes: Vec<Rc<FxHashMap<Id, MigLanguage>>>,
-    first_free_id: usize,
-    root: MigLanguage,
-}
-
-#[derive(Debug)]
-pub struct CollapsedPartialGraph {
-    nodes: Rc<FxHashMap<Id, MigLanguage>>,
-    first_free_id: usize,
-    root_id: Id,
-}
+pub struct CompilingCostFunction<'a> {}
 
 impl StackedPartialGraph {
     pub fn leaf(node: MigLanguage) -> Self {
@@ -88,7 +65,7 @@ pub struct CompilingCost {
     program_cost: usize,
 }
 
-impl CostFunction<MigLanguage> for CompilingCostFunction<'_> {
+impl CostFunction<MigLanguage> for CompilingCostFunction<'_, A> {
     type Cost = Rc<CompilingCost>;
 
     /// Compute cost of given `enode`
@@ -96,27 +73,28 @@ impl CostFunction<MigLanguage> for CompilingCostFunction<'_> {
     where
         C: FnMut(Id) -> Self::Cost,
     {
-        let root = enode.clone();
-        let cost = match enode {
-            MigLanguage::False | MigLanguage::Input(_) => CompilingCost::leaf(root),
-            MigLanguage::Not(id) => {
-                let cost = costs(*id);
-
-                let nesting = if cost.not_nesting == NotNesting::NotANot {
-                    NotNesting::FirstNot
-                } else {
-                    NotNesting::NestedNots
-                };
-                CompilingCost::with_children(self.architecture, root, iter::once((*id, cost)), nesting)
-            }
-            MigLanguage::Maj(children) => CompilingCost::with_children(
-                self.architecture,
-                root,
-                children.map(|id| (id, costs(id))),
-                NotNesting::NotANot,
-            ),
-        };
-        Rc::new(cost)
+        todo!()
+        // let root = enode.clone();
+        // let cost = match enode {
+        //     MigLanguage::False | MigLanguage::Input(_) => CompilingCost::leaf(root),
+        //     MigLanguage::Not(id) => {
+        //         let cost = costs(*id);
+        //
+        //         let nesting = if cost.not_nesting == NotNesting::NotANot {
+        //             NotNesting::FirstNot
+        //         } else {
+        //             NotNesting::NestedNots
+        //         };
+        //         CompilingCost::with_children(self.architecture, root, iter::once((*id, cost)), nesting)
+        //     }
+        //     MigLanguage::Maj(children) => CompilingCost::with_children(
+        //         self.architecture,
+        //         root,
+        //         children.map(|id| (id, costs(id))),
+        //         NotNesting::NotANot,
+        //     ),
+        // };
+        // Rc::new(cost)
     }
 }
 
@@ -130,36 +108,22 @@ impl CompilingCost {
     }
 
     pub fn with_children(
-        architecture: &Architecture,
         root: MigLanguage,
         child_costs: impl IntoIterator<Item=(Id, Rc<CompilingCost>)>,
-        not_nesting: NotNesting,
     ) -> Self {
-        let child_graphs = child_costs
-            .into_iter()
-            .map(|(id, cost)| cost.collapsed_graph(id));
-        let partial_graph = StackedPartialGraph::new(root, child_graphs);
-        let program_cost = compile(architecture, &partial_graph.with_backward_edges()).instructions.len();
-        Self {
-            partial: RefCell::new(Either::Left(partial_graph)),
-            not_nesting,
-            program_cost,
-        }
+        todo!()
+        // let child_graphs = child_costs
+        //     .into_iter()
+        //     .map(|(id, cost)| cost.collapsed_graph(id));
+        // let partial_graph = StackedPartialGraph::new(root, child_graphs);
+        // let program_cost = compile(architecture, &partial_graph.with_backward_edges()).instructions.len();
+        // Self {
+        //     partial: RefCell::new(Either::Left(partial_graph)),
+        //     not_nesting,
+        //     program_cost,
+        // }
     }
 
-    pub fn collapsed_graph(&self, id: Id) -> Rc<CollapsedPartialGraph> {
-        let mut partial = self.partial.borrow_mut();
-        let stacked = match partial.deref() {
-            Either::Left(stacked) => stacked,
-            Either::Right(collapsed) => {
-                assert_eq!(collapsed.root_id, id);
-                return collapsed.clone();
-            }
-        };
-        let collapsed = Rc::new(stacked.collapse(id));
-        *partial = Either::Right(collapsed.clone());
-        collapsed
-    }
 }
 
 impl StackedPartialGraph {

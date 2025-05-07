@@ -1,8 +1,23 @@
+//! # Literature
+//!
+//! - [1] Functionally-Complete Boolean Logic in Real DRAM Chips: Experimental Characterization and Analysis, 2024
+//! - [2] FracDRAM: Fractional Values in Off-the-Shelf DRAM, 2022
+//! - [3] PULSAR: Simultaneous Many-Row Activation for Reliable and High-Performance Computing in Off-the-Shelf DRAM Chips, 2024
+//!
+//! # Submodules
+//!
+//! - [`architecture`] - defines Instructions (and performance-metrics of Instructions in that
+//! architecture) used in FC-DRAM
+//! - [`compilation`] - compiles given LogicNetwork for FC-DRAM architecture
+//! - [`generator`] — Generates output code or reports based on analysis.
+//! - [`implementation_example`] - example implementation of a FCDRAM-Architecture and how to use
+//! it
 mod compilation;
 mod extraction;
 mod optimization;
 mod program;
 mod architecture;
+mod implementation_example;
 
 use std::sync::LazyLock;
 use std::time::Instant;
@@ -43,24 +58,23 @@ struct CompilingReceiverResult<'a> {
     t_compiler: u128,
 }
 
-#[ouroboros::self_referencing]
+// #[ouroboros::self_referencing]
 struct CompilerOutput<'a> {
     graph: EGraph<MigLanguage, ()>,
-    #[borrows(graph)]
-    #[covariant]
+    // #[borrows(graph)]
+    // #[covariant]
     ntk: (
         Extractor<'this, CompilingCostFunction<'a>, MigLanguage, ()>,
         Vec<Id>,
     ),
-    #[borrows(ntk)]
-    program: Program<'a>,
+    // #[borrows(ntk)]
+    program: Program<'a, A>,
 }
 
 fn compiling_receiver<'a>(
-    architecture: &'a Architecture,
     rules: &'a [Rewrite<MigLanguage, ()>],
     settings: CompilerSettings,
-) -> impl Receiver<Result = CompilingReceiverResult<'a>, Node = Mig> + 'a {
+) -> impl Receiver<Result = CompilingReceiverResult<'a, A>, Node = Mig> + 'a {
     EGraph::<MigLanguage, _>::new(()).map(move |(graph, outputs)| {
         let t_runner = std::time::Instant::now();
         let runner = Runner::default().with_egraph(graph).run(rules);
@@ -80,9 +94,7 @@ fn compiling_receiver<'a>(
                 let start_time = Instant::now();
                 let extractor = Extractor::new(
                     &graph,
-                    CompilingCostFunction {
-                        architecture: &architecture,
-                    },
+                    CompilingCostFunction {},
                 );
                 t_extractor = start_time.elapsed().as_millis();
                 (extractor, outputs)
@@ -126,17 +138,18 @@ struct FCDramRewriter(CompilerSettings);
 
 impl Rewriter for FCDramRewriter {
     type Node = Mig;
-    type Intermediate = CompilingReceiverResult<'static>;
+    type Intermediate = CompilingReceiverResult<'static, A>;
 
     fn create_receiver(
         &mut self,
-    ) -> impl Receiver<Node = Mig, Result = CompilingReceiverResult<'static>> + 'static {
-        compiling_receiver(&*ARCHITECTURE, REWRITE_RULES.as_slice(), self.0)
+    ) -> impl Receiver<Node = Mig, Result = CompilingReceiverResult<'static, A>> + 'static {
+        todo!()
+        // compiling_receiver(&*ARCHITECTURE, REWRITE_RULES.as_slice(), self.0)
     }
 
     fn rewrite(
         self,
-        result: CompilingReceiverResult<'static>,
+        result: CompilingReceiverResult<'static, A>,
         output: impl Receiver<Node = Mig, Result = ()>,
     ) {
         result.output.borrow_ntk().send(output);
@@ -163,18 +176,20 @@ struct CompilerStatistics {
 
 #[no_mangle]
 extern "C" fn fcdram_compile(settings: CompilerSettings) -> MigReceiverFFI<CompilerStatistics> {
-    let receiver =
-        compiling_receiver(&*&ARCHITECTURE, REWRITE_RULES.as_slice(), settings).map(|res| {
-            let graph = res.output.borrow_graph();
-            CompilerStatistics {
-                egraph_classes: graph.number_of_classes() as u64,
-                egraph_nodes: graph.total_number_of_nodes() as u64,
-                egraph_size: graph.total_size() as u64,
-                instruction_count: res.output.borrow_program().instructions.len() as u64,
-                t_runner: res.t_runner as u64,
-                t_extractor: res.t_extractor as u64,
-                t_compiler: res.t_compiler as u64,
-            }
-        });
-    MigReceiverFFI::new(receiver)
+    todo!()
+    // TODO: create example `ARCHITECTURE` implementing `FCDRAMArchitecture`
+    // let receiver =
+    //     compiling_receiver(&*&ARCHITECTURE, REWRITE_RULES.as_slice(), settings).map(|res| {
+    //         let graph = res.output.borrow_graph();
+    //         CompilerStatistics {
+    //             egraph_classes: graph.number_of_classes() as u64,
+    //             egraph_nodes: graph.total_number_of_nodes() as u64,
+    //             egraph_size: graph.total_size() as u64,
+    //             instruction_count: res.output.borrow_program().instructions.len() as u64,
+    //             t_runner: res.t_runner as u64,
+    //             t_extractor: res.t_extractor as u64,
+    //             t_compiler: res.t_compiler as u64,
+    //         }
+    //     });
+    // MigReceiverFFI::new(receiver)
 }

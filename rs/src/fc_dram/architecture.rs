@@ -1,273 +1,120 @@
 //! Contains all architecture-specific descriptions
+//! - [`FCDRAMArchitecture`] = trait which needs to be implemented for your DRAM-module
+//! - [`Instruction`] = contains all instructions supported by FC-DRAM architecture
+//! - [ ] `RowAddress`: utility functions to get subarray-id and row-addr within that subarray from
+//!     - [ ] ->create `pub struct Architecture`
+//! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of
+//! RowAddress
 
 
 /// TODO: merge `rows.rs` with `mod.rs` and move into `arch.rs`
-use super::{Architecture, BitwiseOperand, RowAddress};
 use eggmock::{Id, Mig, ProviderWithBackwardEdges, Signal};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
+use std::fmt::{Display, Formatter};
 
-type RowAddress = u64;
+/// Implement this trait for your specific DRAM-module to support FCDRAM-functionality
+/// - contains the mapping of logical-ops to FCDRAM-Architecture (see
+/// [`FCDRAMArchitecture::get_instructions_implementation_of_logic_ops`]
+///
+/// # Possible Changes in Future
+///
+/// - add trait-bound to a more general `Architecture`-trait to fit in the overall framework?
+pub trait FCDRAMArchitecture {
+    /// Returns vector of simultaneously activated rows when issuing `APA(r1,r2)`-cmd
+    /// NOTE: this may depend on the used DRAM - see [3] for a method for reverse-engineering
+    /// which rows are activated simultaneously (also see RowClone)
+    fn get_simultaneously_activated_rows_of_apa_op(r1: RowAddress, r2: RowAddress) -> Vec<RowAddress>;
 
-/// Equivalent to a DRAM row.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum Row {
-    /// Row used as input operand
-    In(RowAddress),
-    /// Row used as output operand
-    Out(RowAddress),
-    /// Why do we need spill rows????
-    Spill(RowAddress),
+    /// Implements given logic operation using FCDRAM-Instructions
+    /// REMINDER: for OR&AND additionall [`Instruction::FracOp`]s need to be issued to setup the
+    /// reference subarray containing `reference_rows` in order to perform the given `logic_op` on
+    /// the `compute_rows` inside the computation rows
+    ///
+    /// - [ ] TODO: for `NOT`: `reference_rows`=??? (empty or =result rows?)
+    ///
+    /// NOTE: `compute_rows` are expected to lay in the same subarray and `reference_rows` in one
+    /// subarray adjacent to the compute subarray (!this is not checked but assumed to be true!)
+    fn get_instructions_implementation_of_logic_ops(logic_op: SupportedLogicOps, compute_rows: Vec<RowAddress>, reference_rows: Vec<RowAddress>) -> Vec<Instruction> {
+        todo!()
+    }
 }
 
-/// Contains a snapshot state of the rows in an Ambit-like DRAM
-#[derive(Debug, Clone)]
-pub struct Rows<'a> {
-    signals: FxHashMap<Signal, Vec<RowOperand>>,
-    rows: FxHashMap<RowOperand, Signal>,
-    spill_counter: u32,
-    /// Representation of the underlying PuD Architecture
-    architecture: &'a Architecture,
+pub type RowAddress = u64;
+
+/// Instructions used in FC-DRAM
+/// - NOT: implemented using `APA`
+/// - AND/OR: implemented by (see [1] Chap6.1.2)
+///     1. setting `V_{AND}`/`V_{OR}` in reference subarray and then issuing (using FracOperation
+///        for storing `V_{DD}/2`)
+///     2. Issue `APA(R_{REF},R_{COM})` to simultaneously activate `N` rows in reference subarray
+///        and `N` rows in compute subarray
+///     3. Wait for `t_{RAS}` (=overwrites activated cells in compute subarray with AND/OR-result)
+///     4. Issue `PRE` to complete the operation
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Instruction {
+    /// Needed for initializing neutral row in reference subarray (to set `V_{AND}`/`V_{OR}` (see
+    /// [1](
+    /// Implemented using AP without any extra cycles in between) (see [2])
+    /// - `PRE` "interrupt the process of row activation, and prevent the sense amplifier from being enabled"
+    FracOp(RowAddress),
+    /// Multiple-Row Activation: `ACT R_F -> PRE -> ACT R_L -> PRE` of rows `R_F`,`R_L` for rows within
+    /// different subarrays. As a result `R_L` holds the negated value of `R_F` (see Chap5.1 of
+    /// PaperFunctionally Complete DRAMs
+    /// Used to implement NOT directly
+    APA(RowAddress,RowAddress),
 }
 
-/// Maps operands from network to LIM rows (?)
-impl<'a> Rows<'a> {
-    /// Initializes the rows with the leaf values in the given network (this values are known from
-    /// the start; intermediate node-values still need to be computed)
-    pub fn new(
-        ntk: &impl ProviderWithBackwardEdges<Node = Mig>,
-        architecture: &'a Architecture,
-    ) -> Self {
-        let mut rows = Rows {
-            signals: FxHashMap::default(),
-            rows: FxHashMap::default(),
-            spill_counter: 0,
-            architecture,
+impl Display for Instruction {
+ fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let description = match self {
+            Instruction::FracOp(row) => "AP(row)",
+            Instruction::APA(row1,row2) => "APA({row1},{row2})",
         };
-        rows.add_leaves(ntk);
-        rows
-    }
-
-    /// Assign leaves to rows
-    /// REMINDER: leaves are either inputs or constants
-    /// TODO: choose rows which are close to Sense-Amps ??
-    /// TODO: change from Mig to Aig?
-    fn add_leaves(&mut self, ntk: &impl ProviderWithBackwardEdges<Node = Mig>) {
-        let leaves = ntk.leaves();
-        self.rows.reserve(leaves.size_hint().0);
-        for id in leaves {
-            let node = ntk.node(id);
-            match node {
-                Mig::Input(i) => {
-                    self.set_empty_row_signal(RowOperand::In(i), Signal::new(id, false));
-                },
-                Mig::False => {
-                    let signal = Signal::new(id, false);
-                    self.set_empty_row_signal(RowOperand::Const(false), signal);
-                    self.set_empty_row_signal(RowOperand::Const(true), signal.invert());
-                },
-                _ => unreachable!("leaf node should be either an input or a constant"),
-            };
-        }
-    }
-
-    /// Returns the current signal of the given row.
-    pub fn get_row_signal(&self, row: RowOperand) -> Option<Signal> {
-        self.rows.get(&row).cloned()
-    }
-
-    /// Returns the signal of the given address
-    /// TODO: how does FC-DRAM deal with inverted signals?
-    pub fn get_address_signal(&self, address: RowAddress) -> Option<Signal> {
-        self.get_row_signal(address.row())?
-            .maybe_invert(address.inverted())
-            .into()
-    }
-
-    /// Returns the signal of the given operand
-    pub fn get_operand_signal(&self, operand: BitwiseOperand) -> Option<Signal> {
-        self.get_address_signal(operand.into())
-    }
-
-    /// Returns all rows with the given signal.
-    pub fn get_rows(&self, signal: Signal) -> impl Iterator<Item = RowOperand> + '_ {
-        self.signals.get(&signal).into_iter().flatten().cloned()
-    }
-
-    /// Returns true iff a signal with the given id is stored in a row.
-    pub fn contains_id(&self, id: Id) -> bool {
-        self.get_rows(Signal::new(id, false)).next().is_some()
-            || self.get_rows(Signal::new(id, true)).next().is_some()
-    }
-
-    /// Adds a new spill row with the given signal and returns its id.
-    /// TODO: Why would we need spill rows???
-    pub fn add_spill(&mut self, signal: Signal) -> u32 {
-        self.spill_counter += 1;
-        self.set_empty_row_signal(RowOperand::Spill(self.spill_counter), signal);
-        self.spill_counter
-    }
-
-    /// Sets the current signal of the given operand
-    /// Returns the signal of the operand previous to this operation if it was changed.
-    pub fn set_signal(&mut self, address: RowAddress, signal: Signal) -> Option<Signal> {
-        self.set_row_signal(address.row(), signal.maybe_invert(address.inverted()))?
-            .maybe_invert(address.inverted())
-            .into()
-    }
-
-    /// Equivalent to `set_row_signals`, but additionally ensures that the row was previously empty
-    /// or contained the same signal.
-    fn set_empty_row_signal(&mut self, row: RowOperand, signal: Signal) {
-        assert_eq!(
-            self.set_row_signal(row, signal),
-            None,
-            "row {row:?} should be empty"
-        )
-    }
-
-    /// Sets the signal of the given row, updating `self.rows` and `self.signals` accordingly.
-    /// Returns the previous signal of the given row if it was changed.
-    fn set_row_signal(&mut self, row: RowOperand, signal: Signal) -> Option<Signal> {
-        let row_entry = self.rows.entry(row);
-
-        // detach previous signal
-        let prev = match &row_entry {
-            Entry::Occupied(v) => {
-                let prev = *v.get();
-                if prev == signal {
-                    // signal already correctly set
-                    return None;
-                }
-                Some(prev)
-            }
-            _ => None,
-        };
-        if let Some(prev) = prev {
-            let prev_locations = self.signals.get_mut(&prev).unwrap();
-            prev_locations.swap_remove(prev_locations.iter().position(|r| *r == row).unwrap());
-        }
-
-        // set new signal
-        row_entry.insert_entry(signal);
-        self.signals.entry(signal).or_default().push(row);
-
-        prev
-    }
-
-    /// Free rows
-    /// NOTE: id depends on whether the signal is inverted or not (=MSB set or not)
-    pub fn free_id_rows(&mut self, id: Id) {
-        let non_inv = Signal::new(id, false);
-        let inv = Signal::new(id, true);
-        for sig in [non_inv, inv] {
-            let Some(rows) = self.signals.remove(&sig) else {
-                continue
-            };
-            for row in rows {
-                self.rows.remove(&row);
-            }
-        }
+        write!(f, "{}", description)
     }
 }
 
-/// Single Row or multiple rows (since FC-DRAM can also work with multiple row-operands)
-/// TODO: change this to optionally take in multiple rows
-/// IDEA: enum of single row vs multiple rows?
-pub struct RowOperand {
-    rows: Vec<RowAddress>,
-}
+/// TODO: where to put logic for determining which rows are activated simultaneously given two
+/// row-addresses
+impl Instruction {
+    /// Return Addreses of Rows which are used by this instruction (=operand-rows AND result-row)
+    /// - REMINDER: although only two row-operands are given to `APA`, more rows can be/are affected due to *Simultaneous Row Activation* (see [3])
+    /// TODO
+    pub fn used_addresses<'a>(
+        &self,
+    ) -> impl Iterator<Item = RowAddress> + 'a {
+        todo!()
+        // let from = match self {
+        //     Instruction::AAP(from, _) => from,
+        //     Instruction::AP(op) => op,
+        // }
+        // .row_addresses(architecture);
+        // let to = match self {
+        //     Instruction::AAP(_, to) => Some(*to),
+        //     _ => None,
+        // }
+        // .into_iter()
+        // .flat_map(|addr| addr.row_addresses(architecture));
+        // from.chain(to)
+    }
 
-impl RowOperand {
-    /// Currently supported nr of row-operands: 1,2,4,8,16,32
-    /// - ! the given `RowAddresses` are expected to refer to rows within the SAME subarray (TODO:
-    /// check if this is forced by FC-DRAM architecture)
-    pub fn new(rows: Vec<RowAddress>) -> Self {
-        const SUPPORTED_ROW_OPERAND_NR: [usize; 6] = [1,2,4,8,16,32];
-        if SUPPORTED_ROW_OPERAND_NR.contains(&rows.len()) {
-            panic!("[ERROR] FC-DRAM currently supports only 1|2|4|8|16|32 row-operands");
-        }
-        Self {
-            rows,
-        }
+    /// Returns all row-addresses whose values are overriden by this instruction
+    /// TODO
+    pub fn overridden_rows<'a>(
+        &self,
+    ) -> impl Iterator<Item = RowAddress> + 'a {
+        todo!()
     }
 }
 
-/// Consists of n rows
-/// `rows_in_subarray` should be either 512 OR 1024, but not both !
-pub struct DRAMSubarray<const rows_in_subarray: usize> {
-   rows: [RowOperand; n],
+/// Contains logical operations which are supported (natively) on FCDRAM-Architecture
+pub enum SupportedLogicOps {
+    NOT,
+    AND,
+    OR,
+    /// implemented using AND+NOT
+    NAND,
+    /// implemented using OR+NOT
+    NOR,
 }
-
-/// Represents subarrays and which of those subarrays are neighbors
-pub struct DRAMChip {
-
-}
-
-#[derive(Clone, Debug)]
-pub struct Architecture {
-    maj_ops: Vec<usize>,
-    multi_activations: Vec<Vec<BitwiseOperand>>,
-    num_dcc: u8,
-}
-
-impl Architecture {
-    pub fn new(multi_activations: Vec<Vec<BitwiseOperand>>, num_dcc: u8) -> Self {
-        let maj_ops = multi_activations
-            .iter()
-            .enumerate()
-            .filter(|(_, ops)| ops.len() == 3)
-            .map(|(i, _)| i)
-            .collect();
-        Self {
-            maj_ops,
-            multi_activations,
-            num_dcc,
-        }
-    }
-}
-
-static ARCHITECTURE: LazyLock<Architecture> = LazyLock::new(|| {
-    use BitwiseOperand::*;
-    Architecture::new(
-        vec![
-            // 2 rows
-            vec![
-                DCC {
-                    index: 0,
-                    inverted: true,
-                },
-                T(0),
-            ],
-            vec![
-                DCC {
-                    inverted: true,
-                    index: 1,
-                },
-                T(1),
-            ],
-            vec![T(2), T(3)],
-            vec![T(0), T(3)],
-            // 3 rows
-            vec![T(0), T(1), T(2)],
-            vec![T(1), T(2), T(3)],
-            vec![
-                DCC {
-                    index: 0,
-                    inverted: false,
-                },
-                T(1),
-                T(2),
-            ],
-            vec![
-                DCC {
-                    index: 0,
-                    inverted: false,
-                },
-                T(0),
-                T(3),
-            ],
-        ],
-        2,
-    )
-});

@@ -1,128 +1,44 @@
-use super::{Architecture, BitwiseOperand, BitwiseRow, RowOperand, Rows};
+//! Functionality for generating actual program using architecture defined in [`architecture`] by
+//! compiling given logic-network (see [`compilation`]) and potentially adding some manual
+//! optimizations ([`optimization`])
+use super::architecture::{FCDRAMArchitecture, RowAddress};
+use crate::fc_dram::architecture::Instruction;
 use eggmock::{Id, Mig, ProviderWithBackwardEdges, Signal};
 use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut};
 
-/// Instructions which operate on DRAM-Rows
-/// TODO: adjust instructions to FC-DRAM?!
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Instruction {
-    /// TODO: What does this instr do?
-    /// TODO: which row is operand, which one is a result?
-    AAP(RowOperand, RowOperand),
-    /// TODO: What does this instr do?
-    AP(RowOperand),
-    /// Multiple-Row Activation: `ACT R_F -> PRE -> ACT R_L -> PRE` of rows `R_F`,`R_L` for rows within
-    /// different subarrays. As a result `R_L` holds the negated value of `R_F`
-    /// Used to implement NOT directly
-    APAP(RowOperand,RowOperand),
-}
 
 #[derive(Debug, Clone)]
 pub struct Program<'a> {
-    pub architecture: &'a Architecture,
+    pub architecture: &'a A,
     pub instructions: Vec<Instruction>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ProgramState<'a> {
-    program: Program<'a>,
+    program: Program<'a, A>,
     /// currently used rows
-    rows: Rows<'a>,
+    rows: Vec<RowAddress>,
 }
 
-impl<'a> Program<'a> {
-    pub fn new(architecture: &'a Architecture, instructions: Vec<Instruction>) -> Self {
+impl<'a> Program<'a, A> {
+    pub fn new(instructions: Vec<Instruction>) -> Self {
         Self {
-            architecture,
             instructions,
         }
     }
 }
 
-impl Instruction {
-    /// Return Addreses of Rows which are used by this instruction (=operand-rows AND result-row)
-    pub fn used_addresses<'a>(
-        &self,
-        architecture: &'a Architecture,
-    ) -> impl Iterator<Item = RowAddress> + 'a {
-        let from = match self {
-            Instruction::AAP(from, _) => from,
-            Instruction::AP(op) => op,
-        }
-        .row_addresses(architecture);
-        let to = match self {
-            Instruction::AAP(_, to) => Some(*to),
-            _ => None,
-        }
-        .into_iter()
-        .flat_map(|addr| addr.row_addresses(architecture));
-        from.chain(to)
-    }
-
-    /// Return addresses of operand-rows
-    pub fn input_operands<'a>(
-        &self,
-        architecture: &'a Architecture,
-    ) -> impl Iterator<Item = RowAddress> + 'a {
-        let from = match self {
-            Instruction::AAP(from, _) => from,
-            Instruction::AP(op) => op,
-        };
-        from.row_addresses(architecture)
-    }
-
-    pub fn overridden_rows<'a>(
-        &self,
-        architecture: &'a Architecture,
-    ) -> impl Iterator<Item = RowOperand> + 'a {
-        let first = match self {
-            Instruction::AP(a) => a,
-            Instruction::AAP(a, _) => a,
-        }
-        .clone();
-        let first = match first {
-            Address::Bitwise(BitwiseAddress::Multiple(idx)) => {
-                architecture.multi_activations[idx].as_slice()
-            }
-            _ => &[],
-        }
-        .iter()
-        .map(|op| RowOperand::Bitwise(op.row()));
-
-        let second = match self {
-            Instruction::AP(_) => None,
-            Instruction::AAP(_, a) => Some(a.row_addresses(architecture).map(|addr| addr.row())),
-        }
-        .into_iter()
-        .flatten();
-
-        first.chain(second)
-    }
-}
-
 impl<'a> ProgramState<'a> {
     pub fn new(
-        architecture: &'a Architecture,
         network: &impl ProviderWithBackwardEdges<Node = Mig>,
     ) -> Self {
         Self {
-            program: Program::new(architecture, Vec::new()),
-            rows: Rows::new(network, architecture),
+            program: Program::new(Vec::new()),
+            rows: vec!(),
         }
     }
 
-    pub fn maj(&mut self, op: usize, out_signal: Signal, out_address: Option<Address>) {
-        let operands = &self.architecture.multi_activations[op];
-        for operand in operands {
-            self.set_signal(RowAddress::Bitwise(*operand), out_signal);
-        }
-        let instruction = match out_address {
-            Some(out) => Instruction::AAP(BitwiseAddress::Multiple(op).into(), out),
-            None => Instruction::AP(BitwiseAddress::Multiple(op).into()),
-        };
-        self.instructions.push(instruction)
-    }
 
     /// TODO: Does FC-DRAM need copying of signals?
     /// pub fn signal_copy(&mut self, signal: Signal, target: RowAddress, intermediate_dcc: u8) {
@@ -134,102 +50,42 @@ impl<'a> ProgramState<'a> {
     /// **ALWAYS** call this before inserting the actual instruction, otherwise the spill code will
     /// spill the wrong value
     fn set_signal(&mut self, address: RowAddress, signal: Signal) {
-        if let Some(previous_signal) = self.rows.set_signal(address, signal) {
-            if !self.rows.contains_id(previous_signal.node_id()) {
-                let spill_id = self.rows.add_spill(previous_signal);
-                self.instructions
-                    .push(Instruction::AAP(address.into(), Address::Spill(spill_id)));
-            }
-        }
+        todo!()
     }
 
+    /// return rows which are currently unused (so they can be used for operations to come)
     pub fn free_id_rows(&mut self, id: Id) {
-        self.rows.free_id_rows(id);
+        todo!()
     }
 
-    pub fn rows(&self) -> &Rows {
+    pub fn rows(&self) -> &Vec<RowAddress> {
         &self.rows
     }
 }
 
 impl<'a> Deref for ProgramState<'a> {
-    type Target = Program<'a>;
+    type Target = Program<'a, A>;
 
     fn deref(&self) -> &Self::Target {
         &self.program
     }
 }
 
-impl DerefMut for ProgramState<'_> {
+impl<A> DerefMut for ProgramState<'_,> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.program
     }
 }
 
 impl<'a> From<ProgramState<'a>> for Program<'a> {
-    fn from(value: ProgramState<'a>) -> Self {
+    fn from(value: ProgramState<'a, A>) -> Self {
         value.program
     }
 }
 
 /// Print the generated program in human-readable form
-impl Display for Program<'_> {
+impl DRAMArchitecture> Display for Program<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let write_operand = |f: &mut Formatter<'_>, o: &BitwiseOperand| -> std::fmt::Result {
-            match o {
-                BitwiseOperand::T(t) => write!(f, "T{}", t),
-                BitwiseOperand::DCC { inverted, index } => {
-                    if *inverted {
-                        write!(f, "~DCC{}", index)
-                    } else {
-                        write!(f, "DCC{}", index)
-                    }
-                }
-            }
-        };
-        let write_address = |f: &mut Formatter<'_>, a: &Address| -> std::fmt::Result {
-            match a {
-                Address::In(i) => write!(f, "I{}", i),
-                Address::Out(i) => write!(f, "O{}", i),
-                Address::Spill(i) => write!(f, "S{}", i),
-                Address::Const(c) => write!(f, "C{}", if *c { "1" } else { "0" }),
-                Address::Bitwise(b) => match b {
-                    BitwiseAddress::Single(o) => write_operand(f, o),
-                    BitwiseAddress::Multiple(id) => {
-                        let operands = &self.architecture.multi_activations[*id];
-                        for i in 0..operands.len() {
-                            if i == 0 {
-                                write!(f, "[")?;
-                            } else {
-                                write!(f, ", ")?;
-                            }
-                            write_operand(f, &operands[i])?;
-                            if i == operands.len() - 1 {
-                                write!(f, "]")?;
-                            }
-                        }
-                        Ok(())
-                    }
-                },
-            }
-        };
-
-        for instruction in &self.instructions {
-            match instruction {
-                Instruction::AAP(a, b) => {
-                    write!(f, "AAP ")?;
-                    write_address(f, a)?;
-                    write!(f, " ")?;
-                    write_address(f, b)?;
-                    writeln!(f)?;
-                }
-                Instruction::AP(a) => {
-                    write!(f, "AP ")?;
-                    write_address(f, a)?;
-                    writeln!(f)?;
-                }
-            }
-        }
-        Ok(())
+        todo!()
     }
 }
