@@ -2,16 +2,15 @@
 //! - [`FCDRAMArchitecture`] = trait which needs to be implemented for your DRAM-module
 //! - [`Instruction`] = contains all instructions supported by FC-DRAM architecture
 //! - [ ] `RowAddress`: utility functions to get subarray-id and row-addr within that subarray from
-//!     - [ ] ->create `pub struct Architecture`
 //! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of
 //! RowAddress
 
-
-/// TODO: merge `rows.rs` with `mod.rs` and move into `arch.rs`
-use eggmock::{Id, Mig, ProviderWithBackwardEdges, Signal};
+use eggmock::{Id, Aig, ProviderWithBackwardEdges, Signal};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
 use std::fmt::{Display, Formatter};
+
+pub type RowAddress = u64;
 
 /// Implement this trait for your specific DRAM-module to support FCDRAM-functionality
 /// - contains the mapping of logical-ops to FCDRAM-Architecture (see
@@ -21,13 +20,9 @@ use std::fmt::{Display, Formatter};
 ///
 /// - add trait-bound to a more general `Architecture`-trait to fit in the overall framework?
 pub trait FCDRAMArchitecture {
-    /// Returns vector of simultaneously activated rows when issuing `APA(r1,r2)`-cmd
-    /// NOTE: this may depend on the used DRAM - see [3] for a method for reverse-engineering
-    /// which rows are activated simultaneously (also see RowClone)
-    fn get_simultaneously_activated_rows_of_apa_op(r1: RowAddress, r2: RowAddress) -> Vec<RowAddress>;
 
     /// Implements given logic operation using FCDRAM-Instructions
-    /// REMINDER: for OR&AND additionall [`Instruction::FracOp`]s need to be issued to setup the
+    /// REMINDER: for OR&AND additional [`Instruction::FracOp`]s need to be issued to setup the
     /// reference subarray containing `reference_rows` in order to perform the given `logic_op` on
     /// the `compute_rows` inside the computation rows
     ///
@@ -38,9 +33,21 @@ pub trait FCDRAMArchitecture {
     fn get_instructions_implementation_of_logic_ops(logic_op: SupportedLogicOps, compute_rows: Vec<RowAddress>, reference_rows: Vec<RowAddress>) -> Vec<Instruction> {
         todo!()
     }
+
+    /// Returns distance of given `row` to the sense amplifiers
+    /// - important for calculating reliability of the operation (see [1] Chap5.2)
+    /// - Methodology used in [1] to determine distance: RowHammer
+    fn get_distance_of_row_to_sense_amps(&self, row: RowAddress) -> RowDistanceToSenseAmps {
+        todo!()
+    }
 }
 
-pub type RowAddress = u64;
+/// Categories of distances of rows to sense-amops
+pub enum RowDistanceToSenseAmps {
+    Close,
+    Middle,
+    Far,
+}
 
 /// Instructions used in FC-DRAM
 /// - NOT: implemented using `APA`
@@ -120,3 +127,27 @@ pub enum SupportedLogicOps {
     /// implemented using OR+NOT
     NOR,
 }
+
+/// Implements behavior of the RowDecoderCircuitry as described in [3]
+pub trait RowDecoder {
+    /// Returns vector of simultaneously activated rows when issuing `APA(r1,r2)`-cmd
+    /// NOTE: this may depend on the used DRAM - see [3] for a method for reverse-engineering
+    /// which rows are activated simultaneously (also see RowClone)
+    fn get_simultaneously_activated_rows_of_apa_op(&self, r1: RowAddress, r2: RowAddress) -> Vec<RowAddress>;
+
+    // TODO: get activation pattern for given rows r1,r2 (N:N vs N:2N) - or just check whether
+    // N:2N: is supported and let `get_simultaneously_activated_rows_of_apa_op()` handle the rest?
+}
+
+/// Dummy Implementation of a single FCDRAM-Bank
+/// NOTE: in order to implement FCDRAM on a whole DRAM-module,
+/// they user will need to deal with several DRAM-banks separately
+pub struct DummyFCDRAMBank {
+    /// TODO: just replace with bitmask for determining subarray-id??
+    nr_subarrays: u16,
+    nr_rows_per_subarray: u16
+}
+
+// TODO:
+// impl FCDRAMArchitecture for DummyFCDRAMBank {}
+// impl RowDecoder for DummyFCDRAMBank {}

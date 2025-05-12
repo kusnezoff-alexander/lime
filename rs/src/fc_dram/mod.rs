@@ -6,8 +6,7 @@
 //!
 //! # Submodules
 //!
-//! - [`architecture`] - defines Instructions (and performance-metrics of Instructions in that
-//! architecture) used in FC-DRAM
+//! - [`architecture`] - defines Instructions (and performance-metrics of Instructions in that architecture) used in FC-DRAM
 //! - [`compilation`] - compiles given LogicNetwork for FC-DRAM architecture
 //! - [`generator`] — Generates output code or reports based on analysis.
 mod compilation;
@@ -24,25 +23,27 @@ use self::extraction::CompilingCostFunction;
 
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
 use eggmock::{
-    Mig, MigLanguage, MigReceiverFFI, Provider, Receiver, ReceiverFFI, Rewriter,
+    Aig, AigLanguage, AigReceiverFFI, Provider, Receiver, ReceiverFFI, Rewriter,
     RewriterFFI, // TODO: add AOIG-rewrite (bc FC-DRAM supports AND&OR natively)?
 };
 use program::*;
 use architecture::*;
 
 /// Rewrite rules to use in E-Graph Rewriting (see [egg](https://egraphs-good.github.io/))
-/// TODO: adjust rewriting rules to FCDRAM
-static REWRITE_RULES: LazyLock<Vec<Rewrite<MigLanguage, ()>>> = LazyLock::new(|| {
+/// TODO: adjust rewriting rules to FCDRAM (=AND/OR related rewrites like De-Morgan?)
+static REWRITE_RULES: LazyLock<Vec<Rewrite<AigLanguage, ()>>> = LazyLock::new(|| {
     let mut rules = vec![
-        rewrite!("commute_1"; "(maj ?a ?b ?c)" => "(maj ?b ?a ?c)"),
-        rewrite!("commute_2"; "(maj ?a ?b ?c)" => "(maj ?a ?c ?b)"),
+        // TODO: add "or"
+        rewrite!("commute-and"; "(and ?a ?b)" => "(and ?b ?a)"),
+        rewrite!("and-1"; "(and ?a 1)" => "?a"),
+        rewrite!("and-0"; "(and ?a 0)" => "0"),
         rewrite!("not_not"; "(! (! ?a))" => "?a"),
-        rewrite!("maj_1"; "(maj ?a ?a ?b)" => "?a"),
-        rewrite!("maj_2"; "(maj ?a (! ?a) ?b)" => "?b"),
-        rewrite!("associativity"; "(maj ?a ?b (maj ?c ?b ?d))" => "(maj ?d ?b (maj ?c ?b ?a))"),
+        // rewrite!("maj_1"; "(maj ?a ?a ?b)" => "?a"),
+        // rewrite!("maj_2"; "(maj ?a (! ?a) ?b)" => "?b"),
+        // rewrite!("associativity"; "(maj ?a ?b (maj ?c ?b ?d))" => "(maj ?d ?b (maj ?c ?b ?a))"),
     ];
-    rules.extend(rewrite!("invert"; "(! (maj ?a ?b ?c))" <=> "(maj (! ?a) (! ?b) (! ?c))"));
-    rules.extend(rewrite!("distributivity"; "(maj ?a ?b (maj ?c ?d ?e))" <=> "(maj (maj ?a ?b ?c) (maj ?a ?b ?d) ?e)"));
+    // rules.extend(rewrite!("invert"; "(! (maj ?a ?b ?c))" <=> "(maj (! ?a) (! ?b) (! ?c))"));
+    // rules.extend(rewrite!("distributivity"; "(maj ?a ?b (maj ?c ?d ?e))" <=> "(maj (maj ?a ?b ?c) (maj ?a ?b ?d) ?e)"));
     rules
 });
 
@@ -62,11 +63,12 @@ struct CompilingReceiverResult {
 #[ouroboros::self_referencing]
 struct CompilerOutput {
     /// Result E-Graph
-    graph: EGraph<MigLanguage, ()>,
+    graph: EGraph<AigLanguage, ()>,
+    /// (, output-nodes)
     #[borrows(graph)]
     #[covariant]
     ntk: (
-        Extractor<'this, CompilingCostFunction, MigLanguage, ()>,
+        Extractor<'this, CompilingCostFunction, AigLanguage, ()>,
         Vec<Id>,
     ),
     /// Compiled Program
@@ -74,16 +76,18 @@ struct CompilerOutput {
     program: Program,
 }
 
-/// Initiates compilation and prints compilation-statistics
+/// Initiates compilation and prints compilation-statistics (and program if `settings.verbose=true`
+/// - returned receiver allows converting result-graph in both directions (C++ <=> Rust)
+/// - `settings`: compiler-options
 fn compiling_receiver<'a>(
-    rules: &'a [Rewrite<MigLanguage, ()>],
+    rules: &'a [Rewrite<AigLanguage, ()>],
     settings: CompilerSettings,
-) -> impl Receiver<Result = CompilingReceiverResult, Node = Mig> + use<'a> {
+) -> impl Receiver<Result = CompilingReceiverResult, Node = Aig> + use<'a> {
     // REMINDER: EGraph implements `Receiver`
-    EGraph::<MigLanguage, _>::new(()).map(move |(graph, outputs)| {
+    EGraph::<AigLanguage, _>::new(()).map(move |(graph, outputs)| { // `.map()` of `Provider`-trait:
         let t_runner = std::time::Instant::now();
 
-        // run equivalence saturation
+        // 1. Create E-Graph: run equivalence saturation
         let runner = Runner::default().with_egraph(graph).run(rules);
 
         let t_runner = t_runner.elapsed().as_millis();
@@ -92,26 +96,34 @@ fn compiling_receiver<'a>(
             println!("== Runner Report");
             runner.print_report();
         }
+
         let graph = runner.egraph;
 
         let mut t_extractor = 0;
         let mut t_compiler = 0;
 
+        // 2. Given E-Graph: Compile the actual program
         let output = CompilerOutput::new(
             graph,
             |graph| {
                 let start_time = Instant::now();
+                // TODO: what is the extractor for??
                 let extractor = Extractor::new(
-                    &graph,
-                    CompilingCostFunction {},
+                    graph,
+                    CompilingCostFunction {}, // TODO: provide CostFunction !!
                 );
                 t_extractor = start_time.elapsed().as_millis();
                 (extractor, outputs)
             },
             |ntk| {
                 let start_time = Instant::now();
+
+                // ===== MAIN CALL =====
                 let program = compile(&ntk.with_backward_edges()); // actual compilation !!
+                // =====================
+
                 t_compiler = start_time.elapsed().as_millis();
+                // print program if compiler-setting is set
                 if settings.print_program || settings.verbose {
                     if settings.verbose {
                         println!("== Program")
@@ -138,39 +150,46 @@ fn compiling_receiver<'a>(
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
+/// Compiler options
+/// - TODO: add flags like minimal success-rate for program
 struct CompilerSettings {
+    /// Whether to print the compiled program
     print_program: bool,
+    /// Whether to enable verbose output
     verbose: bool,
+    /// Minimal success rate to be guaranteed for success compiled program
+    /// REMINDER: FCDRAM-operations dont have a 100%-success rate to create the correct results
+    min_success_rate: u64,
 }
 
 struct FCDramRewriter(CompilerSettings);
 
 impl Rewriter for FCDramRewriter {
-    type Node = Mig;
+    type Node = Aig;
     type Intermediate = CompilingReceiverResult;
 
     fn create_receiver(
         &mut self,
-    ) -> impl Receiver<Node = Mig, Result = CompilingReceiverResult> + 'static {
-
-        // todo!()
+    ) -> impl Receiver<Node = Aig, Result = CompilingReceiverResult> + 'static {
         compiling_receiver(REWRITE_RULES.as_slice(), self.0)
     }
 
     fn rewrite(
         self,
         result: CompilingReceiverResult,
-        output: impl Receiver<Node = Mig, Result = ()>,
+        output: impl Receiver<Node = Aig, Result = ()>,
     ) {
         result.output.borrow_ntk().send(output);
     }
 }
 
+/// ??
 #[no_mangle]
-extern "C" fn fcdram_rewriter(settings: CompilerSettings) -> MigReceiverFFI<RewriterFFI<Mig>> {
+extern "C" fn fcdram_rewriter(settings: CompilerSettings) -> AigReceiverFFI<RewriterFFI<Aig>> {
     RewriterFFI::new(FCDramRewriter(settings))
 }
 
+/// Statistic results about Compilation-Process
 #[repr(C)]
 struct CompilerStatistics {
     egraph_classes: u64,
@@ -184,8 +203,9 @@ struct CompilerStatistics {
     t_compiler: u64,
 }
 
+/// Main function called from `.cpp()` file - receives compiler settings
 #[no_mangle]
-extern "C" fn fcdram_compile(settings: CompilerSettings) -> MigReceiverFFI<CompilerStatistics> {
+extern "C" fn fcdram_compile(settings: CompilerSettings) -> AigReceiverFFI<CompilerStatistics> {
     // todo!()
     // TODO: create example `ARCHITECTURE` implementing `FCDRAMArchitecture`
     let receiver =
@@ -201,5 +221,5 @@ extern "C" fn fcdram_compile(settings: CompilerSettings) -> MigReceiverFFI<Compi
                 t_compiler: res.t_compiler as u64,
             }
         });
-    MigReceiverFFI::new(receiver)
+    AigReceiverFFI::new(receiver)
 }

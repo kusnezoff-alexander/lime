@@ -25,6 +25,7 @@ extern "C"
     bool verbose;
   };
 
-  eggmock::mig_receiver<eggmock::mig_rewrite> fcdram_rewriter( fcdram_compiler_settings settings );
-  eggmock::mig_receiver<fcdram_compiler_statistics> fcdram_compile( fcdram_compiler_settings settings );
+  eggmock::aig_receiver<eggmock::mig_rewrite> fcdram_rewriter( fcdram_compiler_settings settings );
+  eggmock::aig_receiver<fcdram_compiler_statistics> fcdram_compile( fcdram_compiler_settings settings );
+  // void fcdram_compile();
 }

@@ -5,13 +5,13 @@
 use super::{
     architecture::FCDRAMArchitecture, optimization::optimize, Program, ProgramState, RowAddress
 };
-use eggmock::{Id, Mig, Aig, Node, ProviderWithBackwardEdges, Signal};
+use eggmock::{Id, Aig, Node, ProviderWithBackwardEdges, Signal};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::max;
 
-/// Compiles given `network` to a program that can be run on given `architecture`
+/// Compiles given `network` intto a FCDRAM-[`Program`] that can be run on given `architecture`
 pub fn compile(
-    network: &impl ProviderWithBackwardEdges<Node = Mig>,
+    network: &impl ProviderWithBackwardEdges<Node = Aig>,
 ) -> Program {
     todo!()
     // let mut state = CompilationState::new(architecture, network);
@@ -69,14 +69,14 @@ pub fn compile(
 pub struct CompilationState<'n, P> {
     /// Network (P=Provider, obsolte naming)
     network: &'n P,
-    candidates: FxHashSet<(Id, Mig)>, // TODO: probably change to `Aig` ?
+    candidates: FxHashSet<(Id, Aig)>, // TODO: probably change to `Aig` ?
     program: ProgramState,
 
     outputs: FxHashMap<Id, (u64, Signal)>,
     leftover_use_count: FxHashMap<Id, usize>,
 }
 
-impl<'n, P: ProviderWithBackwardEdges<Node = Mig>> CompilationState<'n, P> {
+impl<'n, P: ProviderWithBackwardEdges<Node = Aig>> CompilationState<'n, P> {
     pub fn new(network: &'n P) -> Self {
         let mut candidates = FxHashSet::default();
         // check all parents of leaves whether they have only leaf children, in which case they are
@@ -116,7 +116,7 @@ impl<'n, P: ProviderWithBackwardEdges<Node = Mig>> CompilationState<'n, P> {
         })
     }
 
-    pub fn compute(&mut self, id: Id, node: Mig, out_address: Option<RowAddress>) {
+    pub fn compute(&mut self, id: Id, node: Aig, out_address: Option<RowAddress>) {
         todo!()
     }
 

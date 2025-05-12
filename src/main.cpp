@@ -28,24 +28,27 @@ void run_ambit_example(mig_network in)
 /**
  * TODO: change `mig` to `aig`??
  */
-void run_fcdram_example(mig_network in)
+void run_fcdram_example(aig_network in)
 {
-  fcdram_compiler_statistics result = eggmock::send_mig( in, fcdram_compile( fcdram_compiler_settings{
+  std::cout << "Sending graph to fcdram_compile..." << std::endl;
+  // fcdram_compile();
+  fcdram_compiler_statistics result = eggmock::send_aig( in, fcdram_compile( fcdram_compiler_settings{
                                                            .print_program = true,
                                                            .verbose = true,
                                                        } ) );
-  std::cout << "IC:" << result.instruction_count << std::endl;
-  std::cout << "t1:" << result.t_runner << std::endl;
-  std::cout << "t2:" << result.t_extractor << std::endl;
-  std::cout << "t3:" << result.t_compiler << std::endl;
+  // std::cout << "IC:" << result.instruction_count << std::endl;
+  // std::cout << "t1:" << result.t_runner << std::endl;
+  // std::cout << "t2:" << result.t_extractor << std::endl;
+  // std::cout << "t3:" << result.t_compiler << std::endl;
 
-  // mig_network rewritten = rewrite_mig( in, fcdram_rewriter() );
+  // aig_network rewritten = rewrite_mig( in, fcdram_rewriter() );
   // write_dot( rewritten, "out.dot" );
 }
 
 int main()
 {
   mig_network in;
+  // aig_network in;
   const auto b_i = in.create_pi();
   const auto b_i_next = in.create_pi();
   const auto m = in.create_pi();
@@ -57,5 +60,5 @@ int main()
 
   write_dot( in, "in.dot" );
   run_ambit_example(in);
-  run_fcdram_example(in);
+  // run_fcdram_example(in);
 }

@@ -3,7 +3,7 @@
 //! optimizations ([`optimization`])
 use super::architecture::{FCDRAMArchitecture, RowAddress};
 use crate::fc_dram::architecture::Instruction;
-use eggmock::{Id, Mig, ProviderWithBackwardEdges, Signal};
+use eggmock::{Id, Aig, ProviderWithBackwardEdges, Signal};
 use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut};
 
@@ -30,7 +30,7 @@ impl Program {
 
 impl ProgramState {
     pub fn new(
-        network: &impl ProviderWithBackwardEdges<Node = Mig>,
+        network: &impl ProviderWithBackwardEdges<Node = Aig>,
     ) -> Self {
         Self {
             program: Program::new(Vec::new()),

@@ -1,16 +1,9 @@
 //! Computation of Compiling Costs
 
 use eggmock::egg::{CostFunction, Id};
-use eggmock::{EggIdToSignal, MigLanguage, Mig, NetworkLanguage, Provider, Signal};
-use either::Either;
-use rustc_hash::FxHashMap;
-use std::cell::RefCell;
-use std::cmp::{max, Ordering};
-use std::iter;
-use std::ops::{Deref, Index};
+use eggmock::{EggIdToSignal, AigLanguage, Aig, NetworkLanguage, Provider, Signal};
+use std::cmp::Ordering;
 use std::rc::Rc;
-use super::architecture::FCDRAMArchitecture;
-use super::compile;
 
 pub struct CompilingCostFunction{}
 
@@ -20,22 +13,26 @@ pub struct CompilingCostFunction{}
 #[derive(Debug)]
 pub struct CompilingCost {
     // partial: RefCell<Either<StackedPartialGraph, Rc<CollapsedPartialGraph>>>,
+    /// Probability that the whole program will run successfully
+    success_rate: f64,
+    /// Estimation of program cost (from input logic-ops)
     program_cost: usize,
 }
 
-impl CostFunction<MigLanguage> for CompilingCostFunction {
+impl CostFunction<AigLanguage> for CompilingCostFunction {
     type Cost = Rc<CompilingCost>;
 
     /// Compute cost of given `enode`
-    fn cost<C>(&mut self, enode: &MigLanguage, mut costs: C) -> Self::Cost
+    /// TODO: NEXT
+    fn cost<C>(&mut self, enode: &AigLanguage, mut costs: C) -> Self::Cost
     where
         C: FnMut(Id) -> Self::Cost,
     {
         todo!()
         // let root = enode.clone();
         // let cost = match enode {
-        //     MigLanguage::False | MigLanguage::Input(_) => CompilingCost::leaf(root),
-        //     MigLanguage::Not(id) => {
+        //     AigLanguage::False | AigLanguage::Input(_) => CompilingCost::leaf(root),
+        //     AigLanguage::Not(id) => {
         //         let cost = costs(*id);
         //
         //         let nesting = if cost.not_nesting == NotNesting::NotANot {
@@ -45,7 +42,7 @@ impl CostFunction<MigLanguage> for CompilingCostFunction {
         //         };
         //         CompilingCost::with_children(self.architecture, root, iter::once((*id, cost)), nesting)
         //     }
-        //     MigLanguage::Maj(children) => CompilingCost::with_children(
+        //     AigLanguage::Maj(children) => CompilingCost::with_children(
         //         self.architecture,
         //         root,
         //         children.map(|id| (id, costs(id))),
@@ -57,15 +54,9 @@ impl CostFunction<MigLanguage> for CompilingCostFunction {
 }
 
 impl CompilingCost {
-    pub fn leaf(root: MigLanguage) -> Self {
-        Self {
-            // partial: RefCell::new(Either::Left(StackedPartialGraph::leaf(root))),
-            program_cost: 0,
-        }
-    }
 
     pub fn with_children(
-        root: MigLanguage,
+        root: AigLanguage,
         child_costs: impl IntoIterator<Item=(Id, Rc<CompilingCost>)>,
     ) -> Self {
         todo!()
@@ -83,65 +74,20 @@ impl CompilingCost {
 
 }
 
-// impl StackedPartialGraph {
-//     pub fn get_root_id(&self) -> Id {
-//         Id::from(self.first_free_id + 1)
-//     }
-// }
-//
-// impl Index<Id> for StackedPartialGraph {
-//     type Output = MigLanguage;
-//
-//     fn index(&self, index: Id) -> &Self::Output {
-//         if index == self.get_root_id() {
-//             &self.root
-//         } else {
-//             self.nodes.iter().filter_map(|m| m.get(&index)).next().unwrap()
-//         }
-//     }
-// }
-//
-// impl Provider for StackedPartialGraph {
-//     type Node = Mig;
-//
-//     fn outputs(&self) -> impl Iterator<Item=Signal> {
-//         iter::once(self.to_signal(self.get_root_id()))
-//     }
-//
-//     fn node(&self, id: eggmock::Id) -> Self::Node {
-//         self[Id::from(id)]
-//             .to_node(|id| self.to_signal(id))
-//             .expect("id should point to a non-not node")
-//     }
-// }
-
 impl PartialEq for CompilingCost {
     fn eq(&self, other: &Self) -> bool {
-        todo!()
-        // if other.not_nesting == NotNesting::NestedNots && self.not_nesting == NotNesting::NestedNots {
-        //     true
-        // } else {
-        //     self.program_cost.eq(&other.program_cost)
-        // }
+        self.success_rate == other.success_rate && self.program_cost == other.program_cost
     }
 }
 
+/// First compare based on success-rate, then on program-cost
+/// TODO: more fine-grained comparison !!
 impl PartialOrd for CompilingCost {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        todo!()
-        // #[allow(clippy::collapsible_else_if)]
-        // if self.not_nesting == NotNesting::NestedNots {
-        //     if other.not_nesting == NotNesting::NestedNots {
-        //         Some(Ordering::Equal)
-        //     } else {
-        //         Some(Ordering::Greater)
-        //     }
-        // } else {
-        //     if other.not_nesting == NotNesting::NestedNots {
-        //         Some(Ordering::Less)
-        //     } else {
-        //         self.program_cost.partial_cmp(&other.program_cost)
-        //     }
-        // }
+        if self.success_rate == other.success_rate {
+            self.program_cost.partial_cmp(&other.program_cost)
+        } else {
+            self.success_rate.partial_cmp(&other.success_rate)
+        }
     }
 }
