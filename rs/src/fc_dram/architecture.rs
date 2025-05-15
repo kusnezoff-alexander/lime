@@ -1,16 +1,21 @@
 //! Contains all architecture-specific descriptions
-//! - [`FCDRAMArchitecture`] = trait which needs to be implemented for your DRAM-module
+//! - [`FCDRAMArchitecture`] = DRAM-module-specific specific implementation of FCDRAMArchitecture
 //! - [`Instruction`] = contains all instructions supported by FC-DRAM architecture
 //! - [ ] `RowAddress`: utility functions to get subarray-id and row-addr within that subarray from
 //! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of
 //! RowAddress
 
-use eggmock::{Id, Aig, ProviderWithBackwardEdges, Signal};
-use rustc_hash::FxHashMap;
-use std::collections::hash_map::Entry;
 use std::fmt::{Display, Formatter};
 
 pub type RowAddress = u64;
+
+pub struct FCDRAMArchitecture {
+    rows_per_subarray: u64,
+    nr_subarrays: u64,
+    // TODO: params for calculating distance btw row and sense-amp, ... (particularly where
+    // sense-amps are placed within the DRAM module ?!
+
+}
 
 /// Implement this trait for your specific DRAM-module to support FCDRAM-functionality
 /// - contains the mapping of logical-ops to FCDRAM-Architecture (see
@@ -19,7 +24,7 @@ pub type RowAddress = u64;
 /// # Possible Changes in Future
 ///
 /// - add trait-bound to a more general `Architecture`-trait to fit in the overall framework?
-pub trait FCDRAMArchitecture {
+impl FCDRAMArchitecture {
 
     /// Implements given logic operation using FCDRAM-Instructions
     /// REMINDER: for OR&AND additional [`Instruction::FracOp`]s need to be issued to setup the

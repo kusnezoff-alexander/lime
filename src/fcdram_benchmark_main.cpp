@@ -7,7 +7,7 @@
 
 #include <chrono>
 #include <iostream>
-#include <mockturtle/networks/mig.hpp>
+#include <mockturtle/networks/aig.hpp>
 
 using namespace mockturtle;
 using namespace eggmock;
@@ -22,16 +22,16 @@ int main( int const argc, char** argv )
     return 1;
   }
 
-  std::optional<mig_network> mig = get_ntk<mig_network>( argv[1] );
-  if ( !mig )
+  std::optional<aig_network> aig = get_ntk<aig_network>( argv[1] );
+  if ( !aig )
   {
     return 1;
   }
 
-  auto const pre_opt_size = mig->size();
+  auto const pre_opt_size = aig->size();
 
   auto const opt_begin = system_clock::now();
-  preoptimize_mig( *mig );
+  preoptimize_aig( *aig );
   auto const t_opt = duration_cast<milliseconds>( system_clock::now() - opt_begin ).count();
 
   auto constexpr settings = fcdram_compiler_settings{
@@ -42,10 +42,10 @@ int main( int const argc, char** argv )
   const auto [egraph_classes, egraph_nodes, egraph_size,
               instruction_count,
               t_runner, t_extractor, t_compiler] =
-      send_mig( *mig, fcdram_compile( settings ) );
+      send_aig( *aig, fcdram_compile( settings ) );
 
   std::cout << t_opt << "\t" << t_runner << "\t" << t_extractor << "\t" << t_compiler << "\t"
-            << pre_opt_size << "\t" << mig->size() << "\t" << mig->num_cis() << "\t" << mig->num_cos() << "\t"
+            << pre_opt_size << "\t" << aig->size() << "\t" << aig->num_cis() << "\t" << aig->num_cos() << "\t"
             << instruction_count << "\t"
             << egraph_classes << "\t" << egraph_nodes << "\t" << egraph_size;
   return 0;

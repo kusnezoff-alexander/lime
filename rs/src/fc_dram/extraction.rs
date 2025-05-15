@@ -5,6 +5,8 @@ use eggmock::{EggIdToSignal, AigLanguage, Aig, NetworkLanguage, Provider, Signal
 use std::cmp::Ordering;
 use std::rc::Rc;
 
+use super::architecture::FCDRAMArchitecture;
+
 pub struct CompilingCostFunction{}
 
 // impl StackedPartialGraph { } // Do I need this??
@@ -22,13 +24,25 @@ pub struct CompilingCost {
 impl CostFunction<AigLanguage> for CompilingCostFunction {
     type Cost = Rc<CompilingCost>;
 
-    /// Compute cost of given `enode`
+    /// Compute cost of given `enode` using `cost_fn`
+    ///
+    /// Parameters determining cost of an enode:
+    /// - distance of row-operands to sense amplifiers
+    /// - operation:
+    ///     - AND=<TODO>
+    ///     - OR=<TODO>
+    ///     - NOT=<TODO>
     /// TODO: NEXT
-    fn cost<C>(&mut self, enode: &AigLanguage, mut costs: C) -> Self::Cost
+    fn cost<C>(&mut self, enode: &AigLanguage, mut cost_fn: C) -> Self::Cost
     where
         C: FnMut(Id) -> Self::Cost,
     {
         todo!()
+        // let cost = match enode {
+        //     AigLanguage::False => todo!(),
+        //     AigLanguage::Input(row) => // FCDRAMArchitecture::get_distance_of_row_to_sense_amps(&self, row)
+        // }
+
         // let root = enode.clone();
         // let cost = match enode {
         //     AigLanguage::False | AigLanguage::Input(_) => CompilingCost::leaf(root),
