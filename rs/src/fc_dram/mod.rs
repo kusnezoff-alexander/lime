@@ -1,3 +1,5 @@
+//! NOTE: currently FCDRAM has only been shown to work with HK Sync Modules
+//!
 //! # Literature
 //!
 //! - [1] Functionally-Complete Boolean Logic in Real DRAM Chips: Experimental Characterization and Analysis, 2024
@@ -8,23 +10,24 @@
 //!
 //! - [`architecture`] - defines Instructions (and performance-metrics of Instructions in that architecture) used in FC-DRAM
 //! - [`compiler`] - compiles given LogicNetwork for FC-DRAM architecture
-//! - [`generator`] — Generates output code or reports based on analysis.
+//! - [`generator`] - Generates output code or reports based on analysis. (TODO)
+//! - [`optimization`] - applies architecture-specific optimizations to generated program (TODO: don't use here but in MLIR instead)
+//! - [ ] [`program`]
 //! - [`utils`] - utilities (helper macros/...)
+mod architecture;
 mod compiler;
-mod extraction;
+mod egraph_extraction;
 mod optimization;
 mod program;
-mod architecture;
 mod utils;
 
-use std::path::Path;
 use std::sync::LazyLock;
 use std::time::Instant;
 
 use crate::measure_time;
 
 use self::compiler::compile;
-use self::extraction::CompilingCostFunction;
+use self::egraph_extraction::CompilingCostFunction;
 
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
 use eggmock::{
@@ -51,12 +54,6 @@ static REWRITE_RULES: LazyLock<Vec<Rewrite<AigLanguage, ()>>> = LazyLock::new(||
     // rules.extend(rewrite!("invert"; "(! (maj ?a ?b ?c))" <=> "(maj (! ?a) (! ?b) (! ?c))"));
     // rules.extend(rewrite!("distributivity"; "(maj ?a ?b (maj ?c ?d ?e))" <=> "(maj (maj ?a ?b ?c) (maj ?a ?b ?d) ?e)"));
     rules
-});
-
-/// Main variable specifying architecture of DRAM-module for which to compile for
-static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
-    // TODO: init architecture from config file
-    todo!()
 });
 
 /// Compilation result (program + E-Graph)
@@ -104,15 +101,20 @@ fn compiling_receiver<'a>(
                 graph,
                 |graph| {
                     // TODO: what is the extractor for??
-                    let extractor = measure_time!( Extractor::new(
+                    let extractor = measure_time!(
+                        Extractor::new(
                             graph,
-                            CompilingCostFunction {}, // TODO: provide CostFunction !!
-                    ), "t_extractor", settings.print_compilation_stats );
+                            CompilingCostFunction {},
+                        ), // TODO: provide CostFunction !!
+                        "t_extractor", settings.print_compilation_stats
+                    );
                     (extractor, outputs)
                 },
                 |ntk| {
-                    // ===== MAIN CALL =====
-                    let program = measure_time!( compile(&ntk.with_backward_edges()), "t_compiler", settings.print_compilation_stats); // actual compilation !!
+                    // ===== MAIN CALL (actual compilation) =====
+                    let program = measure_time!(
+                        compile(&ntk.with_backward_edges()), "t_compiler", settings.print_compilation_stats
+                    );
                     // =====================
 
                                                                                                                                                 // print program if compiler-setting is set
@@ -124,7 +126,7 @@ fn compiling_receiver<'a>(
                     }
                     program
                 },
-                )
+            )
     })
 }
 

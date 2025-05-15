@@ -5,8 +5,6 @@ use eggmock::{EggIdToSignal, AigLanguage, Aig, NetworkLanguage, Provider, Signal
 use std::cmp::Ordering;
 use std::rc::Rc;
 
-use super::architecture::FCDRAMArchitecture;
-
 pub struct CompilingCostFunction{}
 
 // impl StackedPartialGraph { } // Do I need this??
