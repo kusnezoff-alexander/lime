@@ -1,5 +1,5 @@
 use super::{Architecture, BitwiseOperand, BitwiseRow, Row, Rows};
-use eggmock::{Id, Mig, ProviderWithBackwardEdges, Signal};
+use eggmock::{Id, Mig, NetworkWithBackwardEdges, Signal};
 use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut};
 
@@ -116,7 +116,7 @@ impl Instruction {
 impl<'a> ProgramState<'a> {
     pub fn new(
         architecture: &'a Architecture,
-        network: &impl ProviderWithBackwardEdges<Node = Mig>,
+        network: &impl NetworkWithBackwardEdges<Node = Mig>,
     ) -> Self {
         Self {
             program: Program::new(architecture, Vec::new()),

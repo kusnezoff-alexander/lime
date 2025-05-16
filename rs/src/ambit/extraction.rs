@@ -1,5 +1,6 @@
+use super::{compile, Architecture};
 use eggmock::egg::{CostFunction, Id};
-use eggmock::{EggIdToSignal, MigLanguage, Mig, NetworkLanguage, Provider, Signal};
+use eggmock::{EggIdToSignal, Mig, MigLanguage, Network, NetworkLanguage, Signal};
 use either::Either;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -7,10 +8,9 @@ use std::cmp::{max, Ordering};
 use std::iter;
 use std::ops::{Deref, Index};
 use std::rc::Rc;
-use super::{compile, Architecture};
 
 pub struct CompilingCostFunction<'a> {
-    pub architecture: &'a Architecture
+    pub architecture: &'a Architecture,
 }
 
 #[derive(Debug, Default, Eq, PartialEq)]
@@ -45,7 +45,7 @@ impl StackedPartialGraph {
     }
     pub fn new(
         root: MigLanguage,
-        child_graphs: impl IntoIterator<Item=Rc<CollapsedPartialGraph>>,
+        child_graphs: impl IntoIterator<Item = Rc<CollapsedPartialGraph>>,
     ) -> Self {
         let mut nodes = Vec::new();
         let mut first_free_id = 0;
@@ -101,7 +101,12 @@ impl CostFunction<MigLanguage> for CompilingCostFunction<'_> {
                 } else {
                     NotNesting::NestedNots
                 };
-                CompilingCost::with_children(self.architecture, root, iter::once((*id, cost)), nesting)
+                CompilingCost::with_children(
+                    self.architecture,
+                    root,
+                    iter::once((*id, cost)),
+                    nesting,
+                )
             }
             MigLanguage::Maj(children) => CompilingCost::with_children(
                 self.architecture,
@@ -125,14 +130,16 @@ impl CompilingCost {
     pub fn with_children(
         architecture: &Architecture,
         root: MigLanguage,
-        child_costs: impl IntoIterator<Item=(Id, Rc<CompilingCost>)>,
+        child_costs: impl IntoIterator<Item = (Id, Rc<CompilingCost>)>,
         not_nesting: NotNesting,
     ) -> Self {
         let child_graphs = child_costs
             .into_iter()
             .map(|(id, cost)| cost.collapsed_graph(id));
         let partial_graph = StackedPartialGraph::new(root, child_graphs);
-        let program_cost = compile(architecture, &partial_graph.with_backward_edges()).instructions.len();
+        let program_cost = compile(architecture, &partial_graph.with_backward_edges())
+            .instructions
+            .len();
         Self {
             partial: RefCell::new(Either::Left(partial_graph)),
             not_nesting,
@@ -167,15 +174,19 @@ impl Index<Id> for StackedPartialGraph {
         if index == self.get_root_id() {
             &self.root
         } else {
-            self.nodes.iter().filter_map(|m| m.get(&index)).next().unwrap()
+            self.nodes
+                .iter()
+                .filter_map(|m| m.get(&index))
+                .next()
+                .unwrap()
         }
     }
 }
 
-impl Provider for StackedPartialGraph {
+impl Network for StackedPartialGraph {
     type Node = Mig;
 
-    fn outputs(&self) -> impl Iterator<Item=Signal> {
+    fn outputs(&self) -> impl Iterator<Item = Signal> {
         iter::once(self.to_signal(self.get_root_id()))
     }
 
@@ -188,7 +199,8 @@ impl Provider for StackedPartialGraph {
 
 impl PartialEq for CompilingCost {
     fn eq(&self, other: &Self) -> bool {
-        if other.not_nesting == NotNesting::NestedNots && self.not_nesting == NotNesting::NestedNots {
+        if other.not_nesting == NotNesting::NestedNots && self.not_nesting == NotNesting::NestedNots
+        {
             true
         } else {
             self.program_cost.eq(&other.program_cost)

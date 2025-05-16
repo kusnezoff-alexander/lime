@@ -1,5 +1,5 @@
 use super::{Architecture, BitwiseOperand, SingleRowAddress};
-use eggmock::{Id, Mig, ProviderWithBackwardEdges, Signal};
+use eggmock::{Id, Mig, NetworkWithBackwardEdges, Signal};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
 
@@ -33,7 +33,7 @@ pub struct Rows<'a> {
 impl<'a> Rows<'a> {
     /// Initializes the rows with the leaf values in the given network.
     pub fn new(
-        ntk: &impl ProviderWithBackwardEdges<Node = Mig>,
+        ntk: &impl NetworkWithBackwardEdges<Node = Mig>,
         architecture: &'a Architecture,
     ) -> Self {
         let mut rows = Rows {
@@ -46,10 +46,10 @@ impl<'a> Rows<'a> {
         rows
     }
 
-    fn add_leaves(&mut self, ntk: &impl ProviderWithBackwardEdges<Node = Mig>) {
-        let leaves = ntk.leaves();
-        self.rows.reserve(leaves.size_hint().0);
-        for id in leaves {
+    fn add_leafs(&mut self, ntk: &impl NetworkWithBackwardEdges<Node = Mig>) {
+        let leafs = ntk.leafs();
+        self.rows.reserve(leafs.size_hint().0);
+        for id in leafs {
             let node = ntk.node(id);
             match node {
                 Mig::Input(i) => {
@@ -168,7 +168,7 @@ impl<'a> Rows<'a> {
         let inv = Signal::new(id, true);
         for sig in [non_inv, inv] {
             let Some(rows) = self.signals.remove(&sig) else {
-                continue
+                continue;
             };
             for row in rows {
                 self.rows.remove(&row);
