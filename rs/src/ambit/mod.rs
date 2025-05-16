@@ -12,8 +12,7 @@ use self::extraction::CompilingCostFunction;
 
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
 use eggmock::{
-    Mig, MigLanguage, MigReceiverFFI, Provider, Receiver, ReceiverFFI, Rewriter,
-    RewriterFFI,
+    Mig, MigLanguage, MigReceiverFFI, Network, Receiver, ReceiverFFI, Rewriter, RewriterFFI,
 };
 use program::*;
 use rows::*;
