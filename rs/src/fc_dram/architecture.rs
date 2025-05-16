@@ -18,8 +18,9 @@ static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
 
     // TODO: init architecture a run-time, eg from config file
     let get_activated_rows_from_apa = |row1: RowAddress, row2: RowAddress| -> Vec<RowAddress> {
-        let activated_rows = vec!(row1, row2);
+        let mut activated_rows = vec!(row1, row2);
         // TODO: get other activated rows and add them to `activated_rows`
+        activated_rows.push(123456); // TEST: add random row
         activated_rows
     };
 
@@ -155,8 +156,8 @@ pub enum Instruction {
 impl Display for Instruction {
  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let description = match self {
-            Instruction::FracOp(row) => "AP({row})",
-            Instruction::APA(row1,row2) => "APA({row1},{row2})",
+            Instruction::FracOp(row) => format!("AP({row})"),
+            Instruction::APA(row1,row2) => format!("APA({row1},{row2})"),
         };
         write!(f, "{}", description)
     }
