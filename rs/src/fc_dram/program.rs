@@ -3,7 +3,7 @@
 //! optimizations ([`optimization`])
 use super::architecture::{FCDRAMArchitecture, RowAddress};
 use crate::fc_dram::architecture::Instruction;
-use eggmock::{Id, Aig, ProviderWithBackwardEdges, Signal};
+use eggmock::{Id, Aig, NetworkWithBackwardEdges, Signal};
 use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut};
 
@@ -30,7 +30,7 @@ impl Program {
 
 impl ProgramState {
     pub fn new(
-        network: &impl ProviderWithBackwardEdges<Node = Aig>,
+        network: &impl NetworkWithBackwardEdges<Node = Aig>,
     ) -> Self {
         Self {
             program: Program::new(Vec::new()),
@@ -85,6 +85,12 @@ impl From<ProgramState> for Program {
 /// Print the generated program in human-readable form
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        for instr in &self.instructions {
+            match instr {
+                Instruction::FracOp(row) => write!(f, "AP({row})")?, // TODO: repeat this by the factor set in compiler-settings
+                Instruction::APA(row1, row2, ) => write!(f, "APA({row1},{row2})")?,
+            }
+        }
+        Ok(())
     }
 }

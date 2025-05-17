@@ -3,9 +3,9 @@
 //! into a [`program`] using some [`optimization`]
 
 use super::{
-    architecture::FCDRAMArchitecture, optimization::optimize, Program, ProgramState, RowAddress
+    architecture::{FCDRAMArchitecture, Instruction}, optimization::optimize, Program, ProgramState, RowAddress
 };
-use eggmock::{Id, Aig, Node, ProviderWithBackwardEdges as NetworkWithBackwardEdges, Signal};
+use eggmock::{Id, Aig, Node, NetworkWithBackwardEdges, Signal};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::max;
 
@@ -15,7 +15,10 @@ pub fn compile(
 ) -> Program {
 
     let (outputs, leaves) = (network.outputs(), network.leaves());
-    todo!()
+    Program {
+        instructions: vec!(Instruction::FracOp(-1)) ,
+    }
+    // todo!()
     // optimize(&mut program);
     // program
 }

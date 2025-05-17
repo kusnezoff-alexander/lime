@@ -1,7 +1,7 @@
 //! Computation of Compiling Costs
 
 use eggmock::egg::{CostFunction, Id};
-use eggmock::{EggIdToSignal, AigLanguage, Aig, NetworkLanguage, Provider, Signal};
+use eggmock::{EggIdToSignal, AigLanguage, Aig, NetworkLanguage, Network, Signal};
 use std::cmp::Ordering;
 use std::rc::Rc;
 
@@ -30,16 +30,31 @@ impl CostFunction<AigLanguage> for CompilingCostFunction {
     ///     - AND=<TODO>
     ///     - OR=<TODO>
     ///     - NOT=<TODO>
+    ///
     /// TODO: NEXT
     fn cost<C>(&mut self, enode: &AigLanguage, mut cost_fn: C) -> Self::Cost
     where
         C: FnMut(Id) -> Self::Cost,
     {
-        todo!()
-        // let cost = match enode {
-        //     AigLanguage::False => todo!(),
-        //     AigLanguage::Input(row) => // FCDRAMArchitecture::get_distance_of_row_to_sense_amps(&self, row)
-        // }
+        let cost = match enode {
+            AigLanguage::False => 1,
+            AigLanguage::Input(_node) => {
+                // FCDRAMArchitecture::get_distance_of_row_to_sense_amps(&self, row)
+                2
+            },
+            AigLanguage::And([_node1, _node2]) => {
+                3
+            },
+            AigLanguage::Not(_node) => {
+                4
+            },
+        };
+
+        Rc::new(CompilingCost {
+            success_rate: 0.0,
+            program_cost: cost,
+        })
+        // todo!()
 
         // let root = enode.clone();
         // let cost = match enode {
@@ -63,27 +78,6 @@ impl CostFunction<AigLanguage> for CompilingCostFunction {
         // };
         // Rc::new(cost)
     }
-}
-
-impl CompilingCost {
-
-    pub fn with_children(
-        root: AigLanguage,
-        child_costs: impl IntoIterator<Item=(Id, Rc<CompilingCost>)>,
-    ) -> Self {
-        todo!()
-        // let child_graphs = child_costs
-        //     .into_iter()
-        //     .map(|(id, cost)| cost.collapsed_graph(id));
-        // let partial_graph = StackedPartialGraph::new(root, child_graphs);
-        // let program_cost = compile(architecture, &partial_graph.with_backward_edges()).instructions.len();
-        // Self {
-        //     partial: RefCell::new(Either::Left(partial_graph)),
-        //     not_nesting,
-        //     program_cost,
-        // }
-    }
-
 }
 
 impl PartialEq for CompilingCost {

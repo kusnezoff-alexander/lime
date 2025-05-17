@@ -42,12 +42,12 @@ impl<'a> Rows<'a> {
             spill_counter: 0,
             architecture,
         };
-        rows.add_leaves(ntk);
+        rows.add_leafs(ntk);
         rows
     }
 
     fn add_leafs(&mut self, ntk: &impl NetworkWithBackwardEdges<Node = Mig>) {
-        let leafs = ntk.leafs();
+        let leafs = ntk.leaves();
         self.rows.reserve(leafs.size_hint().0);
         for id in leafs {
             let node = ntk.node(id);

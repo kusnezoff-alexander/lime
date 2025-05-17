@@ -31,7 +31,7 @@ use self::egraph_extraction::CompilingCostFunction;
 
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
 use eggmock::{
-    Aig, AigLanguage, AigReceiverFFI, Provider, Receiver, ReceiverFFI, Rewriter,
+    Aig, AigLanguage, AigReceiverFFI, Network, Receiver, ReceiverFFI, Rewriter,
     RewriterFFI, // TODO: add AOIG-rewrite (bc FC-DRAM supports AND&OR natively)?
 };
 use program::*;
@@ -65,10 +65,11 @@ struct CompilerOutput {
     #[borrows(graph)]
     #[covariant]
     ntk: (
-        Extractor<'this, CompilingCostFunction, AigLanguage, ()>,
+        Extractor<'this, CompilingCostFunction, AigLanguage, ()>, // `'this`=self-reference
         Vec<Id>,
     ),
     /// Compiled Program
+    /// Program is compiled using previously (EGraph-)extracted `ntk`
     #[borrows(ntk)]
     program: Program,
 }
@@ -96,11 +97,10 @@ fn compiling_receiver<'a>(
             let graph = runner.egraph;
 
 
-            // 2. Given E-Graph: Compile the actual program and return result
             CompilerOutput::new(
                 graph,
                 |graph| {
-                    // TODO: what is the extractor for??
+            // 2. Given E-Graph: Retrieve best graph using custom `CompilingCostFunction`
                     let extractor = measure_time!(
                         Extractor::new(
                             graph,
@@ -108,15 +108,15 @@ fn compiling_receiver<'a>(
                         ), // TODO: provide CostFunction !!
                         "t_extractor", settings.print_compilation_stats
                     );
-                    (extractor, outputs)
+                    (extractor, outputs) // produce `ntk`
                 },
                 |ntk| {
                     // ===== MAIN CALL (actual compilation) =====
+            // 3. Compile program using extracted network
                     let program = measure_time!(
                         compile(&ntk.with_backward_edges()), "t_compiler", settings.print_compilation_stats
                     );
                     // =====================
-
                                                                                                                                                 // print program if compiler-setting is set
                     if settings.print_program || settings.verbose {
                         if settings.verbose {
