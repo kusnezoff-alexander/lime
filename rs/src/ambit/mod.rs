@@ -10,7 +10,8 @@ use std::time::Instant;
 use self::compilation::compile;
 use self::extraction::CompilingCostFunction;
 
-use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
+use crate::opt_extractor::{OptExtractionNetwork, OptExtractor};
+use eggmock::egg::{rewrite, EGraph, Rewrite, Runner};
 use eggmock::{
     Mig, MigLanguage, MigReceiverFFI, Network, Receiver, ReceiverFFI, Rewriter, RewriterFFI,
 };
@@ -133,10 +134,7 @@ struct CompilerOutput<'a> {
     graph: EGraph<MigLanguage, ()>,
     #[borrows(graph)]
     #[covariant]
-    ntk: (
-        Extractor<'this, CompilingCostFunction<'a>, MigLanguage, ()>,
-        Vec<Id>,
-    ),
+    ntk: OptExtractionNetwork<OptExtractor<'this, CompilingCostFunction<'a>, MigLanguage, ()>>,
     #[borrows(ntk)]
     program: Program<'a>,
 }
@@ -163,18 +161,19 @@ fn compiling_receiver<'a>(
             graph,
             |graph| {
                 let start_time = Instant::now();
-                let extractor = Extractor::new(
+                let extractor = OptExtractor::new(
                     &graph,
                     CompilingCostFunction {
                         architecture: &architecture,
                     },
                 );
                 t_extractor = start_time.elapsed().as_millis();
-                (extractor, outputs)
+                OptExtractionNetwork(extractor, outputs)
             },
             |ntk| {
                 let start_time = Instant::now();
-                let program = compile(architecture, &ntk.with_backward_edges());
+                let program = compile(architecture, &ntk.with_backward_edges())
+                    .expect("network should be compilable");
                 t_compiler = start_time.elapsed().as_millis();
                 if settings.print_program || settings.verbose {
                     if settings.verbose {
