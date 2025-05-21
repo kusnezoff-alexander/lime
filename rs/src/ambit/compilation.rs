@@ -7,6 +7,17 @@ use eggmock::{Id, Mig, NetworkWithBackwardEdges, Node, Signal};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::max;
 
+pub struct CompilationState<'a, 'n, N> {
+    network: &'n N,
+    /// contains all not yet computed network nodes that can be immediately computed (i.e. all
+    /// inputs of the node are already computed)
+    candidates: FxHashSet<(Id, Mig)>,
+    program: ProgramState<'a>,
+
+    outputs: FxHashSet<Id>,
+    leftover_use_count: FxHashMap<Id, usize>,
+}
+
 pub fn compile<'a>(
     architecture: &'a Architecture,
     network: &impl NetworkWithBackwardEdges<Node = Mig>,
@@ -78,17 +89,8 @@ pub fn compile<'a>(
     Ok(program)
 }
 
-pub struct CompilationState<'a, 'n, P> {
-    network: &'n P,
-    candidates: FxHashSet<(Id, Mig)>,
-    program: ProgramState<'a>,
-
-    outputs: FxHashSet<Id>,
-    leftover_use_count: FxHashMap<Id, usize>,
-}
-
-impl<'a, 'n, P: NetworkWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, P> {
-    pub fn new(architecture: &'a Architecture, network: &'n P) -> Self {
+impl<'a, 'n, N: NetworkWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, N> {
+    pub fn new(architecture: &'a Architecture, network: &'n N) -> Self {
         let mut candidates = FxHashSet::default();
         // check all parents of leafs whether they have only leaf children, in which case they are
         // candidates
