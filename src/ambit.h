@@ -52,6 +52,10 @@ inline std::pair<mockturtle::mig_network, ambit_compiler_statistics> ambit_rewri
     ambit_compiler_settings settings,
     mockturtle::mig_network& ntk )
 {
+  if ( settings.preoptimize )
+  {
+    preoptimize_mig( ntk );
+  }
   mockturtle::mig_network out;
   const auto stat = eggmock::send_mig(
       ntk, ambit_rewrite_ffi( settings, eggmock::receive_mig( out ) ) );
