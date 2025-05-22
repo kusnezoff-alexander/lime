@@ -32,21 +32,23 @@ impl CostFunction<AigLanguage> for CompilingCostFunction {
     ///     - NOT=<TODO>
     ///
     /// TODO: NEXT
+    /// - [ ] Subgraph direkt kompilieren ??
     fn cost<C>(&mut self, enode: &AigLanguage, mut cost_fn: C) -> Self::Cost
     where
         C: FnMut(Id) -> Self::Cost,
     {
         let cost = match enode {
-            AigLanguage::False => 1,
+            AigLanguage::False => 0,
             AigLanguage::Input(_node) => {
                 // FCDRAMArchitecture::get_distance_of_row_to_sense_amps(&self, row)
+                // TODO: make cost depend on data-pattern of input?
                 2
             },
             AigLanguage::And([_node1, _node2]) => {
                 3
             },
             AigLanguage::Not(_node) => {
-                4
+                1
             },
         };
 
@@ -67,6 +69,7 @@ impl CostFunction<AigLanguage> for CompilingCostFunction {
         //         } else {
         //             NotNesting::NestedNots
         //         };
+        //         //
         //         CompilingCost::with_children(self.architecture, root, iter::once((*id, cost)), nesting)
         //     }
         //     AigLanguage::Maj(children) => CompilingCost::with_children(

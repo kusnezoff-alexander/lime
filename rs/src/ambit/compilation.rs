@@ -65,6 +65,7 @@ pub fn compile<'a>(
 
 pub struct CompilationState<'a, 'n, P> {
     network: &'n P,
+    /// Network-Nodes whose inputs all have been computed
     candidates: FxHashSet<(Id, Mig)>,
     program: ProgramState<'a>,
 

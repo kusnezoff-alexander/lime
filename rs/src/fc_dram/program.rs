@@ -86,10 +86,7 @@ impl From<ProgramState> for Program {
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for instr in &self.instructions {
-            match instr {
-                Instruction::FracOp(row) => write!(f, "AP({row})")?, // TODO: repeat this by the factor set in compiler-settings
-                Instruction::APA(row1, row2, ) => write!(f, "APA({row1},{row2})")?,
-            }
+            write!(f, "{}", instr)?;
         }
         Ok(())
     }

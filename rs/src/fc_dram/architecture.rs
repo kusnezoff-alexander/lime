@@ -5,22 +5,63 @@
 //! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of
 //! RowAddress
 
-use std::{fmt::{Display, Formatter}, sync::LazyLock};
+use std::{fmt::{Display, Formatter}, ops::Add, sync::LazyLock};
+
+use itertools::Itertools;
+use log::debug;
 
 /// Main variable specifying architecture of DRAM-module for which to compile for
 /// - this is currently just an example implementation for testing purpose; (TODO: make this
 /// configurable at runtime)
 /// TODO: add field to simulate row-decoder circuitry, needed for impl Simultaneous-row-activation
 /// TODO: make this configurable at runtime
-static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
+pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
     const NR_SUBARRAYS: i64 = 2i64.pow(7);
     const ROWS_PER_SUBARRAY: i64 = 2i64.pow(9);
 
+    // Implementation of the Hypothetical Row Decoder from [3] Chap4.2
+    // - GWLD (Global Wordline Decoder)=decode higher bits to select addressed subarray
+    // - LWLD (Local Wordline Decoder)=hierarchy of decoders which decode lower bits; latches remain set when using `APA`
+    //      - see [3] Chap4.2: nr of Predecoders in LWLD determines number & addresses of simultaneously activated rows
+    //  - does work for the example shown in [3] Chap3.2: `APA(256,287)` activates rows `287,286,281,280,263,262,257,256`
+    // TODO: add overlapping of higher-order-bits (GWLD)
     // TODO: init architecture a run-time, eg from config file
+    // TODO: maybe evaluate statically?
     let get_activated_rows_from_apa = |row1: RowAddress, row2: RowAddress| -> Vec<RowAddress> {
-        let mut activated_rows = vec!(row1, row2);
-        // TODO: get other activated rows and add them to `activated_rows`
-        activated_rows.push(123456); // TEST: add random row
+        // 1. Define Predecoders by defining for which of the bits they're responsible
+        // each Predecoder is resonsible for some of the lower order bits
+        let predecoder_bitmasks = vec!(
+            0b110000000, // first predecoder (PE) predecodes bits[8,7]
+            0b001100000, // Predecoder PD
+            0b000011000, // Predecoder PC
+            0b000000110, // Predecoder PB
+            0b000000001, // last predecoder (PA) predecodes bits[0]
+        );
+
+        // for each predecoder store which bits will remain set due to `APA(row1,row)`:
+        let overlapping_bits = vec!(
+            // latches set by `ACT(row1)`  --- latches set by `ACT(row2)`
+            [ row1 & predecoder_bitmasks[0], row2 & predecoder_bitmasks[0]],
+            [ row1 & predecoder_bitmasks[1], row2 & predecoder_bitmasks[1]],
+            [ row1 & predecoder_bitmasks[2], row2 & predecoder_bitmasks[2]],
+            [ row1 & predecoder_bitmasks[3], row2 & predecoder_bitmasks[3]],
+            [ row1 & predecoder_bitmasks[4], row2 & predecoder_bitmasks[4]],
+        );
+
+        let mut activated_rows  = vec!();       // TODO: get other activated rows and add them to `activated_rows`
+        // compute all simultaneously activated rows
+        for i in 0..1 << predecoder_bitmasks.len() {
+            let activated_row = overlapping_bits.iter()
+                // start with all row-address bits unset (=0) and first predecoder stage (=1)
+                .fold((0 as RowAddress, 1), |(row, predecoder_stage_onehot), new_row_bits|{
+                    let bitmask_to_choose = (i & predecoder_stage_onehot) > 0;
+                    (row | new_row_bits[bitmask_to_choose as usize], predecoder_stage_onehot << 1)
+                });
+            activated_rows.push(activated_row.0);
+        }
+        debug!("`APA({row1},{row2})` activates the following rows simultaneously: {activated_rows:?}");
+        activated_rows.dedup(); // no need for `.unique()` since this implementation adds equivalent RowAddresses one after the other (!check!!)
+                                 // NOTE: works in-place
         activated_rows
     };
 
@@ -65,17 +106,17 @@ pub type RowAddress = i64;
 
 pub struct FCDRAMArchitecture {
     /// Nr of subarrays in a DRAM module
-    nr_subarrays: i64,
+    pub nr_subarrays: i64,
     /// Nr of rows in a single subarray
-    rows_per_subarray: i64,
+    pub rows_per_subarray: i64,
     /// Returns all activated rows when issuing `APA(row1, row2)`
-    get_activated_rows_from_apa: fn(RowAddress, RowAddress) -> Vec<RowAddress>,
+    pub get_activated_rows_from_apa: fn(RowAddress, RowAddress) -> Vec<RowAddress>,
     // TODO: params for calculating distance btw row and sense-amp, ... (particularly where
     // sense-amps are placed within the DRAM module ?!
     /// Given a row-addr this returns the distance of it to the sense-amps (!determinse
     /// success-rate of op using that `row` as an operand) (see [1] Chap5.2)
     /// - NOTE: Methodology used in [1] to determine distance: RowHammer
-    get_distance_of_row_to_sense_amps: fn(RowAddress) -> RowDistanceToSenseAmps,
+    pub get_distance_of_row_to_sense_amps: fn(RowAddress) -> RowDistanceToSenseAmps,
 }
 
 /// Implement this trait for your specific DRAM-module to support FCDRAM-functionality
@@ -139,6 +180,9 @@ pub enum RowDistanceToSenseAmps {
 ///        and `N` rows in compute subarray
 ///     3. Wait for `t_{RAS}` (=overwrites activated cells in compute subarray with AND/OR-result)
 ///     4. Issue `PRE` to complete the operation
+///
+/// Additionally RowClone-operations are added for moving data around if needed (eg if valid data
+/// would be affected by following Simultaneous-Row-Activations)
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Instruction {
     /// Needed for initializing neutral row in reference subarray (to set `V_{AND}`/`V_{OR}` (see
@@ -150,7 +194,17 @@ pub enum Instruction {
     /// different subarrays. As a result `R_L` holds the negated value of `R_F` (see Chap5.1 of
     /// PaperFunctionally Complete DRAMs
     /// Used to implement NOT directly
-    APA(RowAddress,RowAddress),
+    APA(RowAddress,RowAddress), // TODO: Rename to SimultaneousRowActivation or sth the like ?
+    /// Fast-Parallel-Mode RowClone for cloning row-data within same subarray
+    /// - corresponds to `AA`, basically copies from src-row -> row-buffer -> dst-row
+    /// - first operand=src, 2nd operand=dst where `src` and `dst` MUST reside in the same subarray !
+    RowCloneFPM(RowAddress, RowAddress),
+    /// Copies data from src (1st operand) to dst (2nd operand) using RowClonePSM, which copies the
+    /// data from `this_bank(src_row) -> other_bank(rowX) -> this_bank(dst_row)` (where
+    /// `other_bank` might be any other bank). Since this copy uses the internal DRAM-bus it works
+    /// on cacheline-granularity (64B) which might take some time for 8KiB rows...
+    /// - see [4] Chap3.3 for `TRANSFER`-instruction
+    RowClonePSM(RowAddress, RowAddress),
 }
 
 impl Display for Instruction {
@@ -158,6 +212,11 @@ impl Display for Instruction {
         let description = match self {
             Instruction::FracOp(row) => format!("AP({row})"),
             Instruction::APA(row1,row2) => format!("APA({row1},{row2})"),
+            Instruction::RowCloneFPM(row1,row2) => format!("AA({row1},{row2})"),
+            Instruction::RowClonePSM(row1,row2) => format!("
+                TRANSFER(<this_bank>{row1},<other_bank>(rowX))
+                TANSFER(<other_bank>rowX,<this_bank>{row2})
+            "),
         };
         write!(f, "{}", description)
     }
@@ -195,6 +254,15 @@ impl Instruction {
     ) -> Vec <RowAddress> {
     // ) -> impl Iterator<Item = RowAddress> {
         todo!()
+    }
+
+    pub fn get_nr_memcycles(&self) -> u16 {
+        match self {
+            Instruction::FracOp(__) => 7,     // see [2] ChapIII.A, (two cmd-cycles + five idle cycles)
+            Instruction::APA(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
+            Instruction::RowCloneFPM(_, _) => 2,    // see [4] Chap3.2
+            Instruction::RowClonePSM(_, _) => 256,  // =(8192B/64B)*2 (*2 since copies two time, to and from `<other_bank>` on 64B-granularity
+        }
     }
 }
 

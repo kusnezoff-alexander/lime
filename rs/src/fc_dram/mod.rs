@@ -5,6 +5,7 @@
 //! - [1] Functionally-Complete Boolean Logic in Real DRAM Chips: Experimental Characterization and Analysis, 2024
 //! - [2] FracDRAM: Fractional Values in Off-the-Shelf DRAM, 2022
 //! - [3] PULSAR: Simultaneous Many-Row Activation for Reliable and High-Performance Computing in Off-the-Shelf DRAM Chips, 2024
+//! - [4] RowClone: fast and energy-efficient in-DRAM bulk data copy and initialization, 2013
 //!
 //! # Submodules
 //!
@@ -14,12 +15,12 @@
 //! - [`optimization`] - applies architecture-specific optimizations to generated program (TODO: don't use here but in MLIR instead)
 //! - [ ] [`program`]
 //! - [`utils`] - utilities (helper macros/...)
-mod architecture;
-mod compiler;
-mod egraph_extraction;
-mod optimization;
-mod program;
-mod utils;
+pub mod architecture;
+pub mod compiler;
+pub mod egraph_extraction;
+pub mod optimization;
+pub mod program;
+pub mod utils;
 
 use std::sync::LazyLock;
 use std::time::Instant;
@@ -31,9 +32,9 @@ use self::egraph_extraction::CompilingCostFunction;
 
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
 use eggmock::{
-    Aig, AigLanguage, AigReceiverFFI, Network, Receiver, ReceiverFFI, Rewriter,
-    RewriterFFI, // TODO: add AOIG-rewrite (bc FC-DRAM supports AND&OR natively)?
+    Aig, AigLanguage, AigReceiverFFI, Network, NetworkWithBackwardEdges, Receiver, ReceiverFFI, Rewriter, RewriterFFI, Signal // TODO: add AOIG-rewrite (bc FC-DRAM supports AND&OR natively)?
 };
+use log::{debug, logger};
 use program::*;
 use architecture::*;
 
@@ -45,6 +46,10 @@ static REWRITE_RULES: LazyLock<Vec<Rewrite<AigLanguage, ()>>> = LazyLock::new(||
         rewrite!("commute-and"; "(and ?a ?b)" => "(and ?b ?a)"),
         rewrite!("and-1"; "(and ?a 1)" => "?a"),
         rewrite!("and-0"; "(and ?a 0)" => "0"),
+        rewrite!("and-or"; "(! (or (! ?a) (! ?b)))" => "(and ?a ?b)"), // (De-Morgan) ! not checked whether this works
+        rewrite!("or-and"; "(! (and (! ?a) (! ?b)))" => "(or ?a ?b)" ), // (De-Morgan) ! not checked whether this works
+        // rewrite!("and-or"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
+        // rewrite!("or-and"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
         rewrite!("and-same"; "(and ?a ?a)" => "?a"),
         rewrite!("not_not"; "(! (! ?a))" => "?a"),
         // rewrite!("maj_1"; "(maj ?a ?a ?b)" => "?a"),
@@ -64,12 +69,12 @@ struct CompilerOutput {
     /// (, output-nodes)
     #[borrows(graph)]
     #[covariant]
+    /// A network consists of nodes (accessed via `Extractor` and separately stored `outputs` (`Vec<Id>`)
     ntk: (
-        Extractor<'this, CompilingCostFunction, AigLanguage, ()>, // `'this`=self-reference
-        Vec<Id>,
+        Extractor<'this, CompilingCostFunction, AigLanguage, ()>, // `'this`=self-reference, used to extract best-node from `E-Class` of `AigLanguage`-nodes based on `CompilingCostFunction`
+        Vec<Id>, // vector of outputs
     ),
-    /// Compiled Program
-    /// Program is compiled using previously (EGraph-)extracted `ntk`
+    /// Compiled Program Program is compiled using previously (EGraph-)extracted `ntk`
     #[borrows(ntk)]
     program: Program,
 }
@@ -82,25 +87,33 @@ fn compiling_receiver<'a>(
     settings: CompilerSettings,
 ) -> impl Receiver<Result = CompilerOutput, Node = Aig> + use<'a> {
     // REMINDER: EGraph implements `Receiver`
+    // TODO: deactivate e-graph rewriting, focus on compilation first
     EGraph::<AigLanguage, _>::new(())
-        .map(move |(graph, outputs)| { // `.map()` of `Provider`-trait:
+        .map(move |(graph, outputs)| { // `.map()` of `Provider`-trait!, outputs=vector of EClasses
 
+            debug!("Input EGraph nodes: {:?}", graph.nodes());
+            debug!("Input EGraph's EClasses : {:?}", graph.classes()
+                .map(|eclass| (eclass.id, &eclass.nodes) )
+                .collect::<Vec<(Id,&Vec<AigLanguage>)>>()
+            );
             // 1. Create E-Graph: run equivalence saturation
-            let runner = measure_time!(Runner::default().with_egraph(graph).run(rules),  "t_runner", settings.print_compilation_stats );
-
-
-            if settings.verbose {
-                println!("== Runner Report");
-                runner.print_report();
-            }
-
-            let graph = runner.egraph;
+            // debug("Running equivalence saturation...");
+            // let runner = measure_time!(Runner::default().with_egraph(graph).run(rules),  "t_runner", settings.print_compilation_stats );
+            //
+            //
+            // if settings.verbose {
+            //     println!("== Runner Report");
+            //     runner.print_report();
+            // }
+            //
+            // let graph = runner.egraph;
 
 
             CompilerOutput::new(
                 graph,
                 |graph| {
             // 2. Given E-Graph: Retrieve best graph using custom `CompilingCostFunction`
+                    debug!("Extracting...");
                     let extractor = measure_time!(
                         Extractor::new(
                             graph,
@@ -108,16 +121,30 @@ fn compiling_receiver<'a>(
                         ), // TODO: provide CostFunction !!
                         "t_extractor", settings.print_compilation_stats
                     );
+                    debug!("Outputs: {outputs:?}");
                     (extractor, outputs) // produce `ntk`
                 },
                 |ntk| {
                     // ===== MAIN CALL (actual compilation) =====
             // 3. Compile program using extracted network
+
+                    debug!("Compiling...");
+                    debug!("Network outputs: {:?}", ntk.outputs().collect::<Vec<Signal>>());
+                    let ntk_with_backward_edges = ntk.with_backward_edges();
+                    debug!("Network Leaves: {:?}", ntk_with_backward_edges.leaves().collect::<Vec<eggmock::Id>>());
+                    debug!("Network Outputs of first leaf: {:?}",
+                        ntk_with_backward_edges.node_outputs(
+                            ntk_with_backward_edges.leaves().next().unwrap()
+                        ).collect::<Vec<eggmock::Id>>()
+                    );
+                    // debug!(""
                     let program = measure_time!(
-                        compile(&ntk.with_backward_edges()), "t_compiler", settings.print_compilation_stats
+                        compile(&ntk_with_backward_edges), "t_compiler", settings.print_compilation_stats
                     );
                     // =====================
-                                                                                                                                                // print program if compiler-setting is set
+
+                    // print program if compiler-setting is set
+                    // TOOD: write program to output-file instead !!
                     if settings.print_program || settings.verbose {
                         if settings.verbose {
                             println!("== Program")
@@ -191,6 +218,7 @@ struct CompilerStatistics {
 extern "C" fn fcdram_compile(settings: CompilerSettings) -> AigReceiverFFI<CompilerStatistics> {
     // todo!()
     // TODO: create example `ARCHITECTURE` implementing `FCDRAMArchitecture`
+    env_logger::init();
     let receiver =
         compiling_receiver(REWRITE_RULES.as_slice(), settings)
             .map(|output| {
