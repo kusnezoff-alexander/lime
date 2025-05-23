@@ -4,6 +4,7 @@
 use super::architecture::{FCDRAMArchitecture, RowAddress};
 use crate::fc_dram::architecture::Instruction;
 use eggmock::{Id, Aig, NetworkWithBackwardEdges, Signal};
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut};
 
@@ -11,6 +12,11 @@ use std::ops::{Deref, DerefMut};
 #[derive(Debug, Clone)]
 pub struct Program {
     pub instructions: Vec<Instruction>,
+    /// Specifies where row-operands should be placed prior to calling this program
+    /// (This is a convention which tells the user of this lib where the data should be placed within the DRAM before executing this program)
+    pub input_row_operands_placementl: HashMap<Signal, RowAddress>,
+    /// Specifies into which rows output-operands will have been placed after the program has run successfully
+    pub output_row_operands_placementl: HashMap<Signal, RowAddress>,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +30,8 @@ impl Program {
     pub fn new(instructions: Vec<Instruction>) -> Self {
         Self {
             instructions,
+            input_row_operands_placementl: HashMap::new(),
+            output_row_operands_placementl: HashMap::new(),
         }
     }
 }

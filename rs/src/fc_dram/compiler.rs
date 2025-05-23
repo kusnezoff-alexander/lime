@@ -21,6 +21,14 @@ pub fn place_signals_onto_rows(
 }
 
 /// Compiles given `network` intto a FCDRAM-[`Program`] that can be run on given `architecture`
+///
+/// General Procedure of compilation
+/// 1) Map Logical-Ops to FCDRAM-Primitives (operating on virtual rows)
+/// 2) Map virtual rows to actual physical rows (spilling/moving rows if necessary using `RowClone`)
+///     - similarly to Register Allocation
+///
+/// - [ ]  TODO: increase success-rate using input replication ? at which point to add input replication?
+///
 /// - [ ] TODO: output in which rows
 ///     - 1) data is expected to be placed before program runs
 ///     - 2) outputs can be found after the program has run
@@ -28,6 +36,7 @@ pub fn compile(
     network: &impl NetworkWithBackwardEdges<Node = Aig>,
 ) -> Program {
 
+    // debug!("Compiling {:?}", network);
     // 0. Setup: store all network-nodes yet to be compiled
     let comp_state = CompilationState::new(network); // initializes `.candidates()` with inputs + nodes whose src-operands are all inputs
     let program = Program::new(vec!());
@@ -39,8 +48,9 @@ pub fn compile(
     // TODO: get src-operands of outputs and place them appropriately (with knowledge about output
     // operands!)
 
-    let inputs = network.leaves();
-
+    // start with inputs
+    let primary_inputs = network.leaves();
+    debug!("Primary inputs: {:?}", primary_inputs.collect::<Vec<Id>>());
 
     // println!("{:?}", network.outputs().collect::<Vec<Signal>>());
     debug!("Nodes in network:");

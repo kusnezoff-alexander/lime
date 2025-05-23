@@ -46,8 +46,9 @@ static REWRITE_RULES: LazyLock<Vec<Rewrite<AigLanguage, ()>>> = LazyLock::new(||
         rewrite!("commute-and"; "(and ?a ?b)" => "(and ?b ?a)"),
         rewrite!("and-1"; "(and ?a 1)" => "?a"),
         rewrite!("and-0"; "(and ?a 0)" => "0"),
-        rewrite!("and-or"; "(! (or (! ?a) (! ?b)))" => "(and ?a ?b)"), // (De-Morgan) ! not checked whether this works
-        rewrite!("or-and"; "(! (and (! ?a) (! ?b)))" => "(or ?a ?b)" ), // (De-Morgan) ! not checked whether this works
+        // TODO: first add `AOIG`-language and add conversion AOIG<->AIG (so mockturtle's aig can still be used underneath)
+        // rewrite!("and-or"; "(! (or (! ?a) (! ?b)))" => "(and ?a ?b)"), // (De-Morgan) ! not checked whether this works
+        // rewrite!("or-and"; "(! (and (! ?a) (! ?b)))" => "(or ?a ?b)" ), // (De-Morgan) ! not checked whether this works
         // rewrite!("and-or"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
         // rewrite!("or-and"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
         rewrite!("and-same"; "(and ?a ?a)" => "?a"),
