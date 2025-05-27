@@ -36,6 +36,7 @@ void run_fcdram_example(aig_network in)
                                                            .print_program = true,
                                                            .verbose = true,
 														   .print_compilation_stats = true,
+														   .safe_space_rows_per_subarray = 16,
                                                        } ) );
   // std::cout << "IC:" << result.instruction_count << std::endl;
   // std::cout << "t1:" << result.t_runner << std::endl;

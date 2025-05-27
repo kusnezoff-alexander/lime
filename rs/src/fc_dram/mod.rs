@@ -174,6 +174,12 @@ struct CompilerSettings {
     min_success_rate: u64,
     // /// Location to config-file holding fcdram-specific configs
     // fcdram_config_file: Path,
+
+    /// Nr of rows to use as a safe space for operands per subarray
+    /// - REMINDER: after `AND`/`OR`-ops the src-operands are overwritten by the op-result, so to reuse operands they're put into specially designated rows (="safe-space") which won't be overwritten
+    /// - Ops reusing those operands have to clone the values from the safe-space prior to issuing the Op
+    /// - NOTE: rows which are used as safe-space are determined by analyzing patterns in Simultaneous-row activation for the specific architecture (to ensure that safe-space rows won't be activated on any combination of row-addresses)
+    safe_space_rows_per_subarray: u16,
 }
 
 struct FCDramRewriter(CompilerSettings);

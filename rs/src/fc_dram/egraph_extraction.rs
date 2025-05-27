@@ -42,11 +42,14 @@ impl CostFunction<AigLanguage> for CompilingCostFunction {
             AigLanguage::Input(_node) => {
                 // FCDRAMArchitecture::get_distance_of_row_to_sense_amps(&self, row)
                 // TODO: make cost depend on data-pattern of input?
-                2
+                0
             },
             AigLanguage::And([_node1, _node2]) => {
+                // TODO: get mapping of AND to FCDRAM-Primitives and get how many mem-cycles they take
                 3
             },
+            // TODO: increase cost of NOT? (since it moves the value to another subarray!)
+            // eg prefer `OR(a,b)` to `NOT(AND( NOT(a), NOT(b)))`
             AigLanguage::Not(_node) => {
                 1
             },

@@ -2,17 +2,16 @@
 //! - [`FCDRAMArchitecture`] = DRAM-module-specific specific implementation of FCDRAMArchitecture
 //! - [`Instruction`] = contains all instructions supported by FC-DRAM architecture
 //! - [ ] `RowAddress`: utility functions to get subarray-id and row-addr within that subarray from
-//! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of
-//! RowAddress
+//!
+//! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of RowAddress
 
-use std::{fmt::{Display, Formatter}, ops::Add, sync::LazyLock};
+use std::{collections::{HashMap, HashSet}, fmt::{Display, Formatter}, sync::LazyLock};
 
-use itertools::Itertools;
 use log::debug;
 
 /// Main variable specifying architecture of DRAM-module for which to compile for
-/// - this is currently just an example implementation for testing purpose; (TODO: make this
-/// configurable at runtime)
+/// - this is currently just an example implementation for testing purpose; (TODO: make this configurable at runtime)
+///
 /// TODO: add field to simulate row-decoder circuitry, needed for impl Simultaneous-row-activation
 /// TODO: make this configurable at runtime
 pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
@@ -30,23 +29,23 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
     let get_activated_rows_from_apa = |row1: RowAddress, row2: RowAddress| -> Vec<RowAddress> {
         // 1. Define Predecoders by defining for which of the bits they're responsible
         // each Predecoder is resonsible for some of the lower order bits
-        let predecoder_bitmasks = vec!(
+        let predecoder_bitmasks = [
             0b110000000, // first predecoder (PE) predecodes bits[8,7]
             0b001100000, // Predecoder PD
             0b000011000, // Predecoder PC
             0b000000110, // Predecoder PB
             0b000000001, // last predecoder (PA) predecodes bits[0]
-        );
+        ];
 
         // for each predecoder store which bits will remain set due to `APA(row1,row)`:
-        let overlapping_bits = vec!(
+        let overlapping_bits = [
             // latches set by `ACT(row1)`  --- latches set by `ACT(row2)`
             [ row1 & predecoder_bitmasks[0], row2 & predecoder_bitmasks[0]],
             [ row1 & predecoder_bitmasks[1], row2 & predecoder_bitmasks[1]],
             [ row1 & predecoder_bitmasks[2], row2 & predecoder_bitmasks[2]],
             [ row1 & predecoder_bitmasks[3], row2 & predecoder_bitmasks[3]],
             [ row1 & predecoder_bitmasks[4], row2 & predecoder_bitmasks[4]],
-        );
+        ];
 
         let mut activated_rows  = vec!();       // TODO: get other activated rows and add them to `activated_rows`
         // compute all simultaneously activated rows
@@ -59,10 +58,12 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
                 });
             activated_rows.push(activated_row.0);
         }
-        debug!("`APA({row1},{row2})` activates the following rows simultaneously: {activated_rows:?}");
+        // debug!("`APA({row1},{row2})` activates the following rows simultaneously: {activated_rows:?}");
         activated_rows.dedup(); // no need for `.unique()` since this implementation adds equivalent RowAddresses one after the other (!check!!)
                                  // NOTE: works in-place
-        activated_rows
+
+        // remove duplicate entries
+        activated_rows.into_iter().collect::<HashSet<_>>().into_iter().collect()
     };
 
     let get_distance_of_row_to_sense_amps = |row: RowAddress| -> RowDistanceToSenseAmps {
@@ -93,10 +94,29 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
         }
     };
 
+    let mut precomputed_simultaneous_row_activations = HashMap::new();
+    for i in 0..ROWS_PER_SUBARRAY {
+        precomputed_simultaneous_row_activations.insert((i,i), vec!(i)); // special case: no other row is activated when executing `APA(r1,r1)`
+        for j in i+1..ROWS_PER_SUBARRAY {
+            let activated_rows = get_activated_rows_from_apa(i, j);
+            precomputed_simultaneous_row_activations.insert((i,j), activated_rows.clone());
+            precomputed_simultaneous_row_activations.insert((j,i), activated_rows);
+        }
+    }
+    debug!("Precomputed SRAs: {:#?}", precomputed_simultaneous_row_activations.iter().take(20).collect::<Vec<_>>());
+
+    let precomputed_activated_rows_nr_to_row_address_tuple_mapping=  precomputed_simultaneous_row_activations.iter().fold(HashMap::new(), |mut acc: HashMap<u8, Vec<(RowAddress,RowAddress)>>, (key, vec)| {
+            acc.entry(vec.len() as u8).or_default().push(*key);
+            acc
+    });
+    debug!("SRAs row-nr to row-addr mapping: {:#?}", precomputed_activated_rows_nr_to_row_address_tuple_mapping.iter().map(|(k,v)| format!("{k} rows activated in {} addr-combinations", v.len())).collect::<Vec<String>>());
+
     FCDRAMArchitecture {
         nr_subarrays: NR_SUBARRAYS,
         rows_per_subarray: ROWS_PER_SUBARRAY,
         get_activated_rows_from_apa,
+        precomputed_simultaneous_row_activations,
+        precomputed_activated_rows_nr_to_row_address_tuple_mapping,
         get_distance_of_row_to_sense_amps,
     }
 });
@@ -110,7 +130,16 @@ pub struct FCDRAMArchitecture {
     /// Nr of rows in a single subarray
     pub rows_per_subarray: i64,
     /// Returns all activated rows when issuing `APA(row1, row2)`
-    pub get_activated_rows_from_apa: fn(RowAddress, RowAddress) -> Vec<RowAddress>,
+    /// - NOTE: `row1`,`row2` are expected to reside in adjacent subarrays
+    /// - NOTE: the simultaneously activated rows are expected to have the same addresses in both subarrays
+    ///     - eg `APA(11,29)` (with 1st digit=subarray-id, 2nd digit=row-id) could simultaneously activate rows `0,1,7,9` in subarray1 and subarray2
+    get_activated_rows_from_apa: fn(RowAddress, RowAddress) -> Vec<RowAddress>,
+    /// Stores which rows are simultaneously activated for each combination of Row-Addresses (provided to `APA`-operation)
+    /// - REASON: getting the simultaneously activated will probably be requested very frequently (time-space tradeoff, rather than recomputing on every request))
+    pub precomputed_simultaneous_row_activations: HashMap<(RowAddress, RowAddress), Vec<RowAddress>>,
+    /// For each nr of activated rows get which tuple of row-addresses activate the given nr of rows
+    /// - use to eg restrict the choice of row-addresses for n-ary AND/OR (eg 4-ary AND -> at least activate 8 rows; more rows could be activated when using input replication)
+    pub precomputed_activated_rows_nr_to_row_address_tuple_mapping: HashMap<u8, Vec<(RowAddress,RowAddress)>>,
     // TODO: params for calculating distance btw row and sense-amp, ... (particularly where
     // sense-amps are placed within the DRAM module ?!
     /// Given a row-addr this returns the distance of it to the sense-amps (!determinse
@@ -227,6 +256,7 @@ impl Display for Instruction {
 impl Instruction {
     /// Return Addreses of Rows which are used by this instruction (=operand-rows AND result-row)
     /// - REMINDER: although only two row-operands are given to `APA`, more rows can be/are affected due to *Simultaneous Row Activation* (see [3])
+    ///
     /// TODO
     pub fn used_addresses(
         &self,

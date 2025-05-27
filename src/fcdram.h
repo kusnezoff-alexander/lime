@@ -23,6 +23,7 @@ extern "C"
     bool print_program;
     bool verbose;
 	bool print_compilation_stats;
+	uint16_t safe_space_rows_per_subarray;
   };
 
   eggmock::aig_receiver<eggmock::mig_rewrite> fcdram_rewriter( fcdram_compiler_settings settings );

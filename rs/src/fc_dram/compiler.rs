@@ -92,7 +92,11 @@ impl Compiler {
     }
 
     fn compile() -> Program {
-        Program { instructions: vec!() }
+        Program {
+            instructions: vec!(),
+            input_row_operands_placementl: HashMap::new(),
+            output_row_operands_placementl: HashMap::new(),
+        }
     }
 
     /// Place inputs onto appropriate rows
@@ -115,7 +119,9 @@ pub struct CompilationState<'n, N> {
     /// - ✓ use to determine at which row-addresses output-data can be found
     signal_to_row_mapping: HashMap<Signal, RowAddress>,
     /// Rows which are free (don't hold data which is still needed)
-    free_rows: Vec<RowAddress>
+    free_rows: Vec<RowAddress>,
+    ///
+    row_states: [i32; ARCHITECTURE.nr_subarrays as usize ]
 }
 
 impl<'n, P: NetworkWithBackwardEdges<Node = Aig>> CompilationState<'n, P> {
