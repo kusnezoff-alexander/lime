@@ -27,7 +27,7 @@ use std::time::Instant;
 
 use crate::measure_time;
 
-use self::compiler::compile;
+use self::compiler::Compiler;
 use self::egraph_extraction::CompilingCostFunction;
 
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
@@ -89,6 +89,7 @@ fn compiling_receiver<'a>(
 ) -> impl Receiver<Result = CompilerOutput, Node = Aig> + use<'a> {
     // REMINDER: EGraph implements `Receiver`
     // TODO: deactivate e-graph rewriting, focus on compilation first
+    let mut compiler = Compiler::new(settings); // TODO: rewrite this to a singleton-class
     EGraph::<AigLanguage, _>::new(())
         .map(move |(graph, outputs)| { // `.map()` of `Provider`-trait!, outputs=vector of EClasses
 
@@ -138,9 +139,9 @@ fn compiling_receiver<'a>(
                             ntk_with_backward_edges.leaves().next().unwrap()
                         ).collect::<Vec<eggmock::Id>>()
                     );
-                    // debug!(""
+
                     let program = measure_time!(
-                        compile(&ntk_with_backward_edges), "t_compiler", settings.print_compilation_stats
+                        compiler.compile(&ntk_with_backward_edges), "t_compiler", settings.print_compilation_stats
                     );
                     // =====================
 
@@ -162,7 +163,7 @@ fn compiling_receiver<'a>(
 #[repr(C)]
 /// Compiler options
 /// - TODO: add flags like minimal success-rate for program
-struct CompilerSettings {
+pub struct CompilerSettings {
     /// Whether to print the compiled program
     print_program: bool,
     /// Whether to enable verbose output
@@ -171,7 +172,7 @@ struct CompilerSettings {
     print_compilation_stats: bool,
     /// Minimal success rate to be guaranteed for success compiled program
     /// REMINDER: FCDRAM-operations dont have a 100%-success rate to create the correct results
-    min_success_rate: u64,
+    min_success_rate: f64,
     // /// Location to config-file holding fcdram-specific configs
     // fcdram_config_file: Path,
 
@@ -179,7 +180,7 @@ struct CompilerSettings {
     /// - REMINDER: after `AND`/`OR`-ops the src-operands are overwritten by the op-result, so to reuse operands they're put into specially designated rows (="safe-space") which won't be overwritten
     /// - Ops reusing those operands have to clone the values from the safe-space prior to issuing the Op
     /// - NOTE: rows which are used as safe-space are determined by analyzing patterns in Simultaneous-row activation for the specific architecture (to ensure that safe-space rows won't be activated on any combination of row-addresses)
-    safe_space_rows_per_subarray: u16,
+    safe_space_rows_per_subarray: u8,
 }
 
 struct FCDramRewriter(CompilerSettings);

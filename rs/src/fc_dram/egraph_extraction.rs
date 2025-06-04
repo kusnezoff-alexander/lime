@@ -44,7 +44,7 @@ impl CostFunction<AigLanguage> for CompilingCostFunction {
                 // TODO: make cost depend on data-pattern of input?
                 0
             },
-            AigLanguage::And([_node1, _node2]) => {
+            AigLanguage::And([_node1, _node2]) | AigLanguage::Or([_node1, _node2]) => {
                 // TODO: get mapping of AND to FCDRAM-Primitives and get how many mem-cycles they take
                 3
             },

@@ -9,14 +9,16 @@ use std::{collections::{HashMap, HashSet}, fmt::{Display, Formatter}, sync::Lazy
 
 use log::debug;
 
+pub const NR_SUBARRAYS: i64 = 2i64.pow(7);
+pub const ROWS_PER_SUBARRAY: i64 = 2i64.pow(9);
 /// Main variable specifying architecture of DRAM-module for which to compile for
 /// - this is currently just an example implementation for testing purpose; (TODO: make this configurable at runtime)
 ///
 /// TODO: add field to simulate row-decoder circuitry, needed for impl Simultaneous-row-activation
 /// TODO: make this configurable at runtime
 pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
-    const NR_SUBARRAYS: i64 = 2i64.pow(7);
-    const ROWS_PER_SUBARRAY: i64 = 2i64.pow(9);
+
+    let mut row_activated_by_rowaddress_tuple: HashMap<RowAddress, HashSet<(RowAddress, RowAddress)>> = HashMap::new(); // for each row store which RowAddress-combinations activate it
 
     // Implementation of the Hypothetical Row Decoder from [3] Chap4.2
     // - GWLD (Global Wordline Decoder)=decode higher bits to select addressed subarray
@@ -61,7 +63,6 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
         // debug!("`APA({row1},{row2})` activates the following rows simultaneously: {activated_rows:?}");
         activated_rows.dedup(); // no need for `.unique()` since this implementation adds equivalent RowAddresses one after the other (!check!!)
                                  // NOTE: works in-place
-
         // remove duplicate entries
         activated_rows.into_iter().collect::<HashSet<_>>().into_iter().collect()
     };
@@ -94,35 +95,45 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
         }
     };
 
+    // precompute things based on given SRA (simultaneous row activation function)
     let mut precomputed_simultaneous_row_activations = HashMap::new();
     for i in 0..ROWS_PER_SUBARRAY {
         precomputed_simultaneous_row_activations.insert((i,i), vec!(i)); // special case: no other row is activated when executing `APA(r1,r1)`
         for j in i+1..ROWS_PER_SUBARRAY {
             let activated_rows = get_activated_rows_from_apa(i, j);
             precomputed_simultaneous_row_activations.insert((i,j), activated_rows.clone());
-            precomputed_simultaneous_row_activations.insert((j,i), activated_rows);
+            precomputed_simultaneous_row_activations.insert((j,i), activated_rows.clone());
+
+            for row in activated_rows {
+                row_activated_by_rowaddress_tuple.entry(row)
+                    .or_default()
+                    .insert((i,j));
+            }
         }
     }
-    debug!("Precomputed SRAs: {:#?}", precomputed_simultaneous_row_activations.iter().take(20).collect::<Vec<_>>());
+    // debug!("Precomputed SRAs: {:#?}", precomputed_simultaneous_row_activations.iter().take(20).collect::<Vec<_>>());
 
-    let precomputed_activated_rows_nr_to_row_address_tuple_mapping=  precomputed_simultaneous_row_activations.iter().fold(HashMap::new(), |mut acc: HashMap<u8, Vec<(RowAddress,RowAddress)>>, (key, vec)| {
+    let sra_degree_to_rowaddress_combinations=  precomputed_simultaneous_row_activations.iter().fold(HashMap::new(), |mut acc: HashMap<u8, Vec<(RowAddress,RowAddress)>>, (key, vec)| {
             acc.entry(vec.len() as u8).or_default().push(*key);
             acc
     });
-    debug!("SRAs row-nr to row-addr mapping: {:#?}", precomputed_activated_rows_nr_to_row_address_tuple_mapping.iter().map(|(k,v)| format!("{k} rows activated in {} addr-combinations", v.len())).collect::<Vec<String>>());
+    // output how many combinations of row-addresses activate the given nr of rows
+    debug!("SRAs row-nr to row-addr mapping: {:#?}", sra_degree_to_rowaddress_combinations.iter().map(|(k,v)| format!("{k} rows activated in {} addr-combinations", v.len())).collect::<Vec<String>>());
 
     FCDRAMArchitecture {
         nr_subarrays: NR_SUBARRAYS,
         rows_per_subarray: ROWS_PER_SUBARRAY,
         get_activated_rows_from_apa,
         precomputed_simultaneous_row_activations,
-        precomputed_activated_rows_nr_to_row_address_tuple_mapping,
+        row_activated_by_rowaddress_tuple,
+        sra_degree_to_rowaddress_combinations,
         get_distance_of_row_to_sense_amps,
     }
 });
 
 /// - ! must be smaller than `rows_per_subarray * nr_subarrays` (this is NOT checked!)
 pub type RowAddress = i64;
+pub type SubarrayId = i64;
 
 pub struct FCDRAMArchitecture {
     /// Nr of subarrays in a DRAM module
@@ -137,9 +148,11 @@ pub struct FCDRAMArchitecture {
     /// Stores which rows are simultaneously activated for each combination of Row-Addresses (provided to `APA`-operation)
     /// - REASON: getting the simultaneously activated will probably be requested very frequently (time-space tradeoff, rather than recomputing on every request))
     pub precomputed_simultaneous_row_activations: HashMap<(RowAddress, RowAddress), Vec<RowAddress>>,
-    /// For each nr of activated rows get which tuple of row-addresses activate the given nr of rows
+    /// Map degree of SRA (=nr of activated rows by that SRA) to all combinations of RowAddresses which have that degree of SRA
     /// - use to eg restrict the choice of row-addresses for n-ary AND/OR (eg 4-ary AND -> at least activate 8 rows; more rows could be activated when using input replication)
-    pub precomputed_activated_rows_nr_to_row_address_tuple_mapping: HashMap<u8, Vec<(RowAddress,RowAddress)>>,
+    pub sra_degree_to_rowaddress_combinations: HashMap<u8, Vec<(RowAddress,RowAddress)>>,
+    /// Stores for every rows which combinations of RowAddresses activate that row (needed for finding appropriate safe space rows)
+    pub row_activated_by_rowaddress_tuple: HashMap<RowAddress, HashSet<(RowAddress, RowAddress)>>,
     // TODO: params for calculating distance btw row and sense-amp, ... (particularly where
     // sense-amps are placed within the DRAM module ?!
     /// Given a row-addr this returns the distance of it to the sense-amps (!determinse

@@ -1,4 +1,10 @@
-//! Some manual optimizations (LOWEST PRIORITY)
+//!  Optimize code from `compiler.rs`
+//! - things to optimize for:
+//!     - performance (nr of required mem-cycles): mostly reduce nr of RowClone-ops (rest is mostly predetermined by logic-graph due to 1:1 mapping of LogicalOps -> FCDRAM Primitives)
+//!     - success rate (mostly by choosing right rows to optimize for distance to sense-amps), includes input replication
+//!     - memory-footprint (reduce nr of subarrays used by program)
+//!         - manually adapt safe-space to program requirements: unused safe-space rows could still be used ?!
+//!         - [ ] Rematerialization ?
 use crate::fc_dram::architecture::{RowAddress, Instruction};
 use rustc_hash::FxHashSet;
 
