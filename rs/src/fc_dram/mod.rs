@@ -6,6 +6,8 @@
 //! - [2] FracDRAM: Fractional Values in Off-the-Shelf DRAM, 2022
 //! - [3] PULSAR: Simultaneous Many-Row Activation for Reliable and High-Performance Computing in Off-the-Shelf DRAM Chips, 2024
 //! - [4] RowClone: fast and energy-efficient in-DRAM bulk data copy and initialization, 2013
+//! - [5] Design-Induced Latency Variation in Modern DRAM Chips: Characterization, Analysis, and Latency Reduction Mechanisms, 2017
+//!     - explains why distance of rows to sense-amps influence success-rate of executed op
 //!
 //! # Submodules
 //!

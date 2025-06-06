@@ -51,12 +51,12 @@ impl CostFunction<AigLanguage> for CompilingCostFunction {
             // TODO: increase cost of NOT? (since it moves the value to another subarray!)
             // eg prefer `OR(a,b)` to `NOT(AND( NOT(a), NOT(b)))`
             AigLanguage::Not(_node) => {
-                1
+               100 // NOTs seem to be horrible (unless the computation proceeds in the other subarray where the NOT result is placed)
             },
         };
 
         Rc::new(CompilingCost {
-            success_rate: 0.0,
+            success_rate: 0.0, // TODO
             program_cost: cost,
         })
         // todo!()

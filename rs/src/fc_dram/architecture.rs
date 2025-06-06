@@ -67,6 +67,7 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
         activated_rows.into_iter().collect::<HashSet<_>>().into_iter().collect()
     };
 
+    // just a dummy implementation, see [5] Chap3.2 for details why determining the distance based on the Row Addresses issued by the MemController is difficult
     let get_distance_of_row_to_sense_amps = |row: RowAddress| -> RowDistanceToSenseAmps {
         // ASSUMPTION: last & first rows only have sense-amps from one side
         // TODO: is this true? or do all subarrays have a line of sense-amps on both of their ends??
@@ -153,11 +154,9 @@ pub struct FCDRAMArchitecture {
     pub sra_degree_to_rowaddress_combinations: HashMap<u8, Vec<(RowAddress,RowAddress)>>,
     /// Stores for every rows which combinations of RowAddresses activate that row (needed for finding appropriate safe space rows)
     pub row_activated_by_rowaddress_tuple: HashMap<RowAddress, HashSet<(RowAddress, RowAddress)>>,
-    // TODO: params for calculating distance btw row and sense-amp, ... (particularly where
-    // sense-amps are placed within the DRAM module ?!
-    /// Given a row-addr this returns the distance of it to the sense-amps (!determinse
-    /// success-rate of op using that `row` as an operand) (see [1] Chap5.2)
-    /// - NOTE: Methodology used in [1] to determine distance: RowHammer
+    /// Given a row-addr this returns the distance of it to the sense-amps (!determinse success-rate of op using that `row` as an operand) (see [1] Chap5.2)
+    /// - NOTE: a realistic implementation should use the Methodology from [1] to determine this distance (RowHammer)
+    ///     - there is no way of telling the distance of a row without testing manually (see [5] Chap3.2: "consecutive row addresses issued by the memory controller can be mapped to entirely different regions of DRAM")
     pub get_distance_of_row_to_sense_amps: fn(RowAddress) -> RowDistanceToSenseAmps,
 }
 
@@ -207,10 +206,11 @@ impl FCDRAMArchitecture {
 }
 
 /// Categories of distances of rows to sense-amops
+#[derive(Hash,Eq,PartialEq,PartialOrd,Ord)]
 pub enum RowDistanceToSenseAmps {
-    Close,
-    Middle,
-    Far,
+    Close=2,
+    Middle=1,
+    Far=0,
 }
 
 /// Instructions used in FC-DRAM
@@ -305,6 +305,114 @@ impl Instruction {
             Instruction::APA(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
             Instruction::RowCloneFPM(_, _) => 2,    // see [4] Chap3.2
             Instruction::RowClonePSM(_, _) => 256,  // =(8192B/64B)*2 (*2 since copies two time, to and from `<other_bank>` on 64B-granularity
+        }
+    }
+
+    /// Success Rate off instructions depends on:
+    /// - for AND/OR (`APA`): number of input operands (see [1] Chap6.3)
+    ///     - data pattern can't be taken into consideration here since its not known at compile-time
+    ///     - as well as temperature and DRAM speed rate
+    ///
+    /// TAKEAWAY: `OR` is more reliable than `AND`
+    pub fn get_success_rate_of_apa(&self, implemented_op: SupportedLogicOps) -> f64 {
+
+        // Quote from [1] Chap6.3: "the distance of all simultaneously activated rows" - unclear how this classification happend exactly. Let's be conservative and assume the worst-case behavior
+        // (furthest away row for src-operands). For dst-rows we use the one closest to the sense-amps, since we can choose from which of the rows to read/save the result form
+
+        let success_rate_by_row_distance = {
+            // see [1] Chap5.3 and Chap6.3
+            match implemented_op {
+                SupportedLogicOps::NOT => HashMap::from([
+                        // ((src,dst), success_rate)
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 51.71),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 54.93),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Close), 44.16),
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Middle), 57.47),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Middle), 53.47),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Middle), 81.92),
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Far), 45.34),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 85.02),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 75.13),
+                    ]),
+                SupportedLogicOps::AND => HashMap::from([
+                        // ((reference,compute), success_rate)
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 98.81),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.20),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Close), 80.04),
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Middle), 97.08),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Middle), 83.26),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Middle), 97.71),
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Far), 75.84),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 95.29),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 94.95),
+                    ]),
+                SupportedLogicOps::OR => HashMap::from([
+                        // ((reference,compute), success_rate)
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 99.51),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.65),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Close), 94.29),
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Middle), 98.98),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Middle), 94.15),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Middle), 98.95),
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Far), 89.23),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 98.59),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 98.80),
+                    ]),
+                SupportedLogicOps::NAND => HashMap::from([
+                        // ((reference,compute), success_rate)
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 98.81),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.20),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Close), 79.59),
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Middle), 97.08),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Middle), 82.98),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Middle), 97.67),
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Far), 75.50),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 95.19),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 94.95),
+                    ]),
+                SupportedLogicOps::NOR => HashMap::from([
+                        // ((reference,compute), success_rate)
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 99.51),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.65),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Close), 94.09),
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Middle), 98.97),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Middle), 94.03),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Middle), 98.90),
+                        ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Far), 89.15),
+                        ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 98.52),
+                        ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 98.80),
+                    ]),
+            }
+        };
+
+        match self {
+            Instruction::APA( r1, r2) => {
+                let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(*r1,*r2)).expect("[ERR] Missing SRA for ({r1},{r2}");
+                let nr_operands = activated_rows.len(); // ASSUMPTION: it seems like "operands" referred to the number of activated rows (see [1]
+                // taken from [1] Chap6.3
+                let success_rate_per_operandnr = HashMap::from([
+                    (2, 94.94),
+                    (4, 94.94),
+                    (8, 95.85),
+                    (16, 95.87),
+                    (32, 0.00) // no value in paper ://
+                ]);
+                // nr_operand_success_rate.get(&nr_operands);
+
+                let furthest_src_row = activated_rows.iter()
+                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row)) // RowDistanceToSenseAmps::Far; // TODO: get this
+                    .max()
+                    .expect("[ERR] Activated rows were empty");
+                // NOTE: SRA is assumed to activate the same row-addresses in both subarrays
+                let closest_dst_row = activated_rows.iter()
+                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row)) // RowDistanceToSenseAmps::Far; // TODO: get this
+                    .min()
+                    .expect("[ERR] Activated rows were empty");
+                let total_success_rate = *success_rate_per_operandnr.get(&nr_operands).expect("[ERR] {nr_operands} not =2|4|8|16, the given SRA function seems to not comply with this core assumption.")
+                    * success_rate_by_row_distance.get(&(furthest_src_row, closest_dst_row)).unwrap();
+                total_success_rate
+            },
+            _ => 1.0,
         }
     }
 }

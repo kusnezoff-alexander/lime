@@ -86,10 +86,12 @@ impl Compiler {
             debug!("{:?},", node);
         }
 
-        while !self.comp_state.candidates.is_empty() {
-            // TODO: extend program with instr that is executed next
-            let executed_instructions = &mut self.execute_next_instruction();
-            program.instructions.append(executed_instructions);
+        while let Some((next_candidate, _)) = self.comp_state.candidates.pop() {
+                // TODO: extend program with instr that is executed next
+                let executed_instructions = &mut self.execute_next_instruction(&next_candidate, network);
+                program.instructions.append(executed_instructions);
+
+                // update new candidates
         }
 
         // let (outputs, leaves) = (network.outputs(), network.leaves());
@@ -152,21 +154,18 @@ impl Compiler {
 
     /// Initialize candidates with all nodes that are computable
     fn initialize_candidates(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aig>) {
-        let inputs = network.leaves();
+        let inputs: Vec<Id> = network.leaves().collect();
 
-        // init candidates with all nodes having inputs as src-operands
-
-        for input in inputs {
+        // init candidates with all nodes having only inputs as src-operands
+        for &input in inputs.as_slice() {
             // TODO: NEXT - add all non-input nodes whose src-operands are all inputs
             let mut outputs_with_prio: PriorityQueue<Id, SchedulingPrio> = network.node_outputs(input)
+                .filter(|output| network.node(*output).inputs().iter().all(|other_input| inputs.contains(&other_input.node_id()) )) // only those nodes are candidates, whose src-operands are ALL inputs (->only primary inputs are directly available)
                 .map( |output| (output, self.compute_scheduling_prio_for_node(output, network)) )
                 .collect();
             self.comp_state.candidates.append(&mut outputs_with_prio);
             debug!("{:?} has the following outputs: {:?}", input, network.node_outputs(input).collect::<Vec<Id>>());
         }
-
-        debug!("Selected candidates: {:?}", self.comp_state.candidates);
-        // delete candidates which have non-input src operands
     }
 
     /// Initialize compilation state: mark unsuable rows (eg safe-space rows), place input operands
@@ -180,13 +179,14 @@ impl Compiler {
         self.initialize_candidates(network);
     }
 
-    /// Executes the next instruction based on the following criteria:
-    /// 1. Select candidate which operates on most values which are used last (->to release safe-space right after)
-    /// 2. IF EQUAL: Select candidate with most successors (->pushes more candidates to select from in next step)
-    /// 3. IF EQUAL: Select any of the remaining candidates
-    ///
     /// - [ ] make sure that operation to be executed on those rows won't simultaneously activate other rows holding valid data which will be used by future operations
-    fn execute_next_instruction(&self) -> Vec<Instruction> {
+    fn execute_next_instruction(&mut self, next_candidate: &Id, network: &impl NetworkWithBackwardEdges<Node = Aig>) -> Vec<Instruction> {
+        let src_operands: Vec<Id> = network.node(*next_candidate).inputs()
+            .iter()
+            .map(|signal| signal.node_id())
+            .collect();
+
+        let nr_operands = src_operands.len(); // use to select SRA to activate
         // 1. Make sure rows are placed appropriately in the rows to be simultaneously activated (starting from inputs)
 
         // 1.1 Determine in which rows src-operands for the next candidate-op are located
@@ -198,6 +198,7 @@ impl Compiler {
         // 1.3.1 If activated rows in reference subarray holds valid data: spill to other rows
 
         // 1.4 Issue actual operation
+
         vec!()
     }
 
@@ -321,6 +322,10 @@ struct SchedulingPrio {
     nr_result_operands: usize,
 }
 
+/// To execute the next instruction based on the following criteria:
+/// 1. Select candidate which operates on most values which are used last (->to release safe-space right after)
+/// 2. IF EQUAL: Select candidate with most successors (->pushes more candidates to select from in next step)
+/// 3. IF EQUAL: Select any of the remaining candidates
 impl Ord for SchedulingPrio {
     fn cmp(&self, other: &Self) -> Ordering {
         self.nr_last_value_uses.cmp(&other.nr_last_value_uses)
@@ -343,7 +348,7 @@ mod tests {
     use crate::fc_dram::egraph_extraction::CompilingCostFunction;
 
     use super::*; // import all elements from parent-module
-    use std::sync::{LazyLock, Mutex};
+    use std::sync::{LazyLock, Mutex, Once};
 
     // ERROR: `eggmock`-API doesn't allow this..
     // // For data shared among unittests but initalized only once
@@ -356,21 +361,26 @@ mod tests {
     //     ComputedNetworkWithBackwardEdges::new(&ntk)
     // });
 
-    static TEST_COMPILER: LazyLock<Mutex<Compiler>> = LazyLock::new(|| {
-        Mutex::new(
-            Compiler::new(CompilerSettings { print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, safe_space_rows_per_subarray: 16 } )
-        )
-    });
+    static INIT: Once = Once::new();
+
+    fn init() -> Compiler {
+        INIT.call_once(|| {
+            env_logger::init();
+        });
+        Compiler::new(CompilerSettings { print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, safe_space_rows_per_subarray: 16 } )
+    }
 
     #[test] // mark function as test-fn
     fn test_candidate_initialization() {
-        env_logger::init();
+        let mut compiler = init();
 
         let mut egraph: EGraph<AigLanguage, ()> = Default::default();
         let my_expression: RecExpr<AigLanguage> = "(and (and 1 3) (and 2 3))".parse().unwrap();
         egraph.add_expr(&my_expression);
+        let output2 = egraph.add(AigLanguage::And([eggmock::egg::Id::from(0), eggmock::egg::Id::from(2)])); // additional `And` with one src-operand=input and one non-input src operand
+        debug!("EGraph used for candidate-init: {:?}", egraph);
         let extractor = Extractor::new( &egraph, CompilingCostFunction {});
-        let ntk = &(extractor, vec!(egg::Id::from(5)));
+        let ntk = &(extractor, vec!(egg::Id::from(5), output2));
         ntk.dump();
         // Id(5): And([Signal(false, Id(2)), Signal(false, Id(4))])
         // Id(4): And([Signal(false, Id(3)), Signal(false, Id(1))])
@@ -380,20 +390,21 @@ mod tests {
         // Id(0): Input(1)
 
         // act is if one `AND` has already been computed -> other and (`Id(2)`) should be the only candidate left
-        TEST_COMPILER.lock().unwrap()
-            .comp_state.value_states.insert(eggmock::Id::from(4), ValueState{ is_computed: true, row_location: None });
+        compiler .comp_state.value_states.insert(eggmock::Id::from(4), ValueState{ is_computed: true, row_location: None });
 
         let ntk_backward = ComputedNetworkWithBackwardEdges::new(ntk);
 
-        TEST_COMPILER.lock().unwrap().initialize_candidates(&ntk_backward);
-        println!("{:?}", TEST_COMPILER.lock().unwrap().comp_state.candidates);
-        // let result = add(2, 2);
-        // assert_eq!(result, 4, "Result isn't equal to 4 :/");
+        compiler.initialize_candidates(&ntk_backward);
+        let is_candidate_ids: HashSet<Id> = compiler.comp_state.candidates.iter().map(|(id,_)| *id).collect();
+        let should_candidate_ids: HashSet<Id> = HashSet::from([eggmock::Id::from(2), eggmock::Id::from(4)]);
+        assert_eq!( is_candidate_ids, should_candidate_ids);
+
+        // TODO: test-case with node that relies on one input src-operand and one non-input (intermediate node) src-operand
     }
 
     #[test]
     fn test_compute_scheduling_prio_for_node() {
-        env_logger::init();
+        let mut compiler = init();
 
         let mut egraph: EGraph<AigLanguage, ()> = Default::default();
         let my_expression: RecExpr<AigLanguage> = "(and (and 1 3) (and 2 3))".parse().unwrap();
@@ -409,12 +420,11 @@ mod tests {
         // Id(0): Input(1)
 
         // act is if one `AND` has already been computed -> other and (`Id(2)`) should be the only candidate left
-        TEST_COMPILER.lock().unwrap()
-            .comp_state.value_states.insert(eggmock::Id::from(2), ValueState{ is_computed: true, row_location: None });
+        compiler.comp_state.value_states.insert(eggmock::Id::from(2), ValueState{ is_computed: true, row_location: None });
 
         let ntk_backward = ComputedNetworkWithBackwardEdges::new(ntk);
 
-        let scheduling_prio = TEST_COMPILER.lock().unwrap().compute_scheduling_prio_for_node(eggmock::Id::from(4),  &ntk_backward);
+        let scheduling_prio = compiler.compute_scheduling_prio_for_node(eggmock::Id::from(4),  &ntk_backward);
         assert_eq!(scheduling_prio, SchedulingPrio { nr_last_value_uses: 2, nr_src_operands: 2, nr_result_operands: 1 }  );
 
     }
