@@ -81,6 +81,7 @@ impl Compiler {
             debug!("{:?},", node);
         }
 
+        // 1. Actual compilation
         while let Some((next_candidate, _)) = self.comp_state.candidates.pop() {
                 // TODO: extend program with instr that is executed next
                 let executed_instructions = &mut self.execute_next_instruction(&next_candidate, network);
@@ -173,10 +174,10 @@ impl Compiler {
 
             let row_address = (next_subarray << ROWS_PER_SUBARRAY.ilog2() ) | next_row; // higher bits=id of subarray
 
-            let initial_row_state = RowState { is_compute_row: false, live_value: Some(next_input), constant: None };
+            let initial_row_state = RowState { is_compute_row: false, live_value: Some(Signal::new(next_input, false)), constant: None };
             let initial_value_state = ValueState { is_computed: true, row_location: Some(row_address) };
             self.comp_state.dram_state.insert(row_address, initial_row_state);
-            self.comp_state.value_states.insert(next_input, initial_value_state);
+            self.comp_state.value_states.insert(Signal::new(next_input, false), initial_value_state);
         }
     }
 
@@ -188,9 +189,12 @@ impl Compiler {
         // init candidates with all nodes having only inputs as src-operands
         for &input in inputs.as_slice() {
             // every output has a prio determined eg by how many src-operands it uses last (->to minimize nr of live values in rows)
-            let mut outputs_with_prio: PriorityQueue<Id, SchedulingPrio> = network.node_outputs(input)
+            let mut outputs_with_prio: PriorityQueue<Signal, SchedulingPrio> = network.node_outputs(input)
                 .filter(|output| network.node(*output).inputs().iter().all(|other_input| inputs.contains(&other_input.node_id()) )) // only those nodes are candidates, whose src-operands are ALL inputs (->only primary inputs are directly available)
-                .map( |output| (output, self.compute_scheduling_prio_for_node(output, network)) )
+                .map( |output| {
+                    let output_signal = Signal::new(output, false);
+                    (output_signal, self.compute_scheduling_prio_for_node(output_signal, network))
+                })
                 .collect();
             self.comp_state.candidates.append(&mut outputs_with_prio);
             debug!("{:?} has the following outputs: {:?}", input, network.node_outputs(input).collect::<Vec<Id>>());
@@ -245,7 +249,7 @@ impl Compiler {
     }
 
     /// Places the referenced `src_operands` into the corresponding `row_addresses` which are expected to be simultaneously executed
-    fn init_compute_subarray(&mut self, mut row_addresses: Vec<RowAddress>, mut src_operands: Vec<Id>, logic_op: LogicOp) -> Vec<Instruction> {
+    fn init_compute_subarray(&mut self, mut row_addresses: Vec<RowAddress>, mut src_operands: Vec<Signal>, logic_op: LogicOp) -> Vec<Instruction> {
         let mut instructions = vec!();
         // if there are fewer src-operands than activated rows perform input replication
         row_addresses.sort_by_key(|row| ((ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row))); // replicate input that resides in row with lowest success-rate (=probably the row furthest away)
@@ -269,6 +273,38 @@ impl Compiler {
         }
         instructions
     }
+
+    /// Return sequence of instructions to provide negated inputs (if there are any among `src_operands`)).
+    ///
+    /// NOTE: Some inputs may be needed in a negated form by the candidates. To start execution those
+    /// input operands have to be available with their negated form.
+    /// TODO: NEXT
+    fn init_negated_src_operands(&self, src_operands: Vec<Signal>, network: &impl NetworkWithBackwardEdges<Node = Aig>) -> Vec<Instruction> {
+        let mut instructions = vec!();
+        let mut negated_inputs: HashSet<Signal> = HashSet::new(); // inputs which are required in their negated form
+        for (candidate, _) in &self.comp_state.candidates {
+            let negated_src_operands: Vec<Signal> = network.node(candidate.node_id()).inputs().iter()
+                .filter(|sig| sig.is_inverted())
+                .copied() // map ref to owned val
+                .collect();
+            negated_inputs.extend(negated_src_operands.iter());
+        }
+
+        for neg_in in negated_inputs {
+            if self.comp_state.value_states.contains_key(&neg_in) {
+                // negated signal is already available
+                continue;
+            } else {
+                // else make negated-signal available
+                let unnegated_signal = neg_in.invert();
+                let origin_unneg_signal = self.comp_state.value_states.get(&unnegated_signal).expect("Original version of this value is not available??");
+                // TODO: move value in some safe-space row
+            }
+        }
+
+        instructions
+    }
+
     /// Return id of subarray to use for computation and reference (compute_subarrayid, reference_subarrayid)
     /// - based on location of input rows AND current compilation state
     /// - [ ] POSSIBLE EXTENSION: include lookahead for future ops and their inputs they depend on
@@ -290,14 +326,13 @@ impl Compiler {
     }
 
     /// - [ ] make sure that operation to be executed on those rows won't simultaneously activate other rows holding valid data which will be used by future operations
-    fn execute_next_instruction(&mut self, next_candidate: &Id, network: &impl NetworkWithBackwardEdges<Node = Aig>) -> Vec<Instruction> {
+    fn execute_next_instruction(&mut self, next_candidate: &Signal, network: &impl NetworkWithBackwardEdges<Node = Aig>) -> Vec<Instruction> {
         let mut next_instructions = vec!();
 
         debug!("Executing candidate {:?}", next_candidate);
-        let src_operands: Vec<Id> = network.node(*next_candidate).inputs()
-            .iter()
-            .map(|signal| signal.node_id())
-            .collect();
+        let src_operands: Vec<Signal> = network.node(next_candidate.node_id()).inputs().to_vec();
+        let mut init_neg_operands = self.init_negated_src_operands(src_operands.clone(), network); // TODO NEXT: make sure all required negated operands are available
+        next_instructions.append(&mut init_neg_operands);
 
         let nr_operands = src_operands.len(); // use to select SRA to activate
         let nr_rows = nr_operands.next_power_of_two();
@@ -314,7 +349,7 @@ impl Compiler {
             .collect();
 
         let (compute_subarray, ref_subarray) = self.select_compute_and_ref_subarray(src_rows);
-        let language_op = network.node(*next_candidate);
+        let language_op = network.node(next_candidate.node_id());
 
         let logic_op = match language_op {
             Aig::And(_) => LogicOp::AND,
@@ -355,13 +390,15 @@ impl Compiler {
 
         // 3. Issue actual operation
         next_instructions.push(Instruction::APA(row_combi.0, row_combi.1));
-        for row in comp_rows {
-            self.comp_state.dram_state.insert(row, RowState { is_compute_row: true, live_value: Some(*next_candidate), constant: None });
+        for (&comp_row, &ref_row) in comp_rows.iter().zip(ref_rows.iter()) {
+            self.comp_state.dram_state.insert(comp_row, RowState { is_compute_row: true, live_value: Some(*next_candidate), constant: None });
+            // ref subarray holds negated value afterwarsd
+            self.comp_state.dram_state.insert(ref_row, RowState { is_compute_row: true, live_value: Some(next_candidate.invert()), constant: None });
+            // TODO: `value_state`
         }
-        // TODO NEXT: update `comp_state` (computed values, location of values, ..)
 
-        // 4. Copy result data from dst NEAREST to the sense-amps into a safe-space row
-        // TODO: possible improvement - error correction over all dst-rows (eg majority-vote for each bit, votes weighted by distance to sense-amps?)
+        // 4. Copy result data from dst NEAREST to the sense-amps into a safe-space row and update `value_state`
+        // TODO LAST: possible improvement - error correction over all dst-rows (eg majority-vote for each bit, votes weighted by distance to sense-amps?)
 
         next_instructions
     }
@@ -369,17 +406,20 @@ impl Compiler {
     /// Compute `SchedulingPrio` for a given node
     /// - used for inserting new candidates
     /// TODO: write unittest for this function
-    fn compute_scheduling_prio_for_node(&self, id: Id, network: &impl NetworkWithBackwardEdges<Node = Aig>) -> SchedulingPrio {
-        let nr_last_value_uses = network.node(id).inputs() // for each input check whether `id` is the last node using it
+    fn compute_scheduling_prio_for_node(&self, signal: Signal, network: &impl NetworkWithBackwardEdges<Node = Aig>) -> SchedulingPrio {
+        let nr_last_value_uses = network.node(signal.node_id()).inputs() // for each input check whether `id` is the last node using it
             .iter()
             .fold(0, |acc, input| {
                 let input_id = Signal::node_id(input);
                 let non_computed_outputs: Vec<Id> = network.node_outputs(input_id) // get all other nodes relying on this input
-                    .filter(|out|
-                        *out != id &&
-                        !(self.comp_state.value_states.get(out)
+                    .filter(|out| {
+
+                        let out_signal = Signal::new(*out,false);
+                        out_signal != signal &&
+                        !(self.comp_state.value_states.get(&out_signal)
                             .unwrap_or(&ValueState{is_computed: false, row_location: None }) // no entry means this is the first time accessing this value
                             .is_computed)
+                    }
                     ) // filter for uses of `input` which still rely on it (=those that are not computed yet, except for currently checked node
                     .collect();
                 if non_computed_outputs.is_empty() {
@@ -391,8 +431,8 @@ impl Compiler {
 
         SchedulingPrio {
             nr_last_value_uses,
-            nr_src_operands: network.node(id).inputs().len(),
-            nr_result_operands:  network.node_outputs(id).collect::<Vec<Id>>().len(),
+            nr_src_operands: network.node(signal.node_id()).inputs().len(),
+            nr_result_operands:  network.node_outputs(signal.node_id()).collect::<Vec<Id>>().len(),
         }
     }
 }
@@ -402,7 +442,7 @@ pub struct RowState {
     /// True iff that row is currently: 1) Not a safe-sapce row, 2) Doesn't activate any safe-sapce rows, 3) Isn't holding valid values in the role of a reference-subarray row
     is_compute_row: bool,
     /// `None` if the value inside this row is currently not live
-    live_value: Option<Id>,
+    live_value: Option<Signal>,
     /// Some rows (mostly only safe-space rows) store constants values, see [`CompilationState::constant_values`]
     constant: Option<usize>,
 }
@@ -422,12 +462,12 @@ pub struct CompilationState {
     /// For each row in the dram-module store its state
     dram_state: HashMap<RowAddress, RowState>,
     /// Stores row in which an intermediate result (which is still to be used by future ops) is currently located (or whether it has been computed at all)
-    value_states: HashMap<Id, ValueState>,
+    value_states: HashMap<Signal, ValueState>,
     /// Some constants are stored in fixed rows (!in each subarray), eg 0s and 1s for initializing reference subarray
     constant_values: HashMap<usize, RowAddress>,
     /// List of candidates (ops ready to be issued) prioritized by some metric by which they are scheduled for execution
     /// - NOTE: calculate Nodes `SchedulingPrio` using
-    candidates: PriorityQueue<Id, SchedulingPrio>,
+    candidates: PriorityQueue<Signal, SchedulingPrio>,
 }
 
 impl CompilationState {
@@ -569,13 +609,13 @@ mod tests {
         // Id(0): Input(1)
 
         // act is if one `AND` has already been computed -> other and (`Id(2)`) should be the only candidate left
-        compiler .comp_state.value_states.insert(eggmock::Id::from(4), ValueState{ is_computed: true, row_location: None });
+        compiler .comp_state.value_states.insert(Signal::new(eggmock::Id::from(4), false), ValueState{ is_computed: true, row_location: None });
 
         let ntk_backward = ComputedNetworkWithBackwardEdges::new(ntk);
 
         compiler.initialize_candidates(&ntk_backward);
-        let is_candidate_ids: HashSet<Id> = compiler.comp_state.candidates.iter().map(|(id,_)| *id).collect();
-        let should_candidate_ids: HashSet<Id> = HashSet::from([eggmock::Id::from(2), eggmock::Id::from(4)]);
+        let is_candidate_ids: HashSet<Signal> = compiler.comp_state.candidates.iter().map(|(id,_)| *id).collect();
+        let should_candidate_ids: HashSet<Signal> = HashSet::from([Signal::new( eggmock::Id::from(2), false), Signal::new(eggmock::Id::from(4), false)]);
         assert_eq!( is_candidate_ids, should_candidate_ids);
 
         // TODO: test-case with node that relies on one input src-operand and one non-input (intermediate node) src-operand
@@ -599,11 +639,11 @@ mod tests {
         // Id(0): Input(1)
 
         // act is if one `AND` has already been computed -> other and (`Id(2)`) should be the only candidate left
-        compiler.comp_state.value_states.insert(eggmock::Id::from(2), ValueState{ is_computed: true, row_location: None });
+        compiler.comp_state.value_states.insert(Signal::new(eggmock::Id::from(2), false), ValueState{ is_computed: true, row_location: None });
 
         let ntk_backward = ComputedNetworkWithBackwardEdges::new(ntk);
 
-        let scheduling_prio = compiler.compute_scheduling_prio_for_node(eggmock::Id::from(4),  &ntk_backward);
+        let scheduling_prio = compiler.compute_scheduling_prio_for_node(Signal::new(eggmock::Id::from(4), false),  &ntk_backward);
         assert_eq!(scheduling_prio, SchedulingPrio { nr_last_value_uses: 2, nr_src_operands: 2, nr_result_operands: 1 }  );
 
     }
