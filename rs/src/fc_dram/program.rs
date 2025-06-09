@@ -94,7 +94,7 @@ impl From<ProgramState> for Program {
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for instr in &self.instructions {
-            write!(f, "{}", instr)?;
+            writeln!(f, "{}", instr)?;
         }
         Ok(())
     }

@@ -5,14 +5,20 @@
 //!
 //! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of RowAddress
 
-use std::{collections::{HashMap, HashSet}, fmt::{Display, Formatter}, sync::LazyLock};
+use std::{cmp::Ordering, collections::{BTreeMap, HashMap, HashSet}, fmt::{Display, Formatter}, sync::LazyLock};
 
 use log::debug;
+use priority_queue::PriorityQueue;
 
 pub const NR_SUBARRAYS: i64 = 2i64.pow(7);
 pub const ROWS_PER_SUBARRAY: i64 = 2i64.pow(9);
 pub const SUBARRAY_ID_BITMASK: i64 = 0b1_111_111_000_000_000; // 7 highest bits=subarray id
 pub const ROW_ID_BITMASK: i64 = 0b0_000_000_111_111_111; // 7 highest bits=subarray id
+
+pub fn subarrayid_to_subarray_address(subarray_id: SubarrayId) -> RowAddress {
+    subarray_id << NR_SUBARRAYS.ilog2()
+}
+
 /// Main variable specifying architecture of DRAM-module for which to compile for
 /// - this is currently just an example implementation for testing purpose; (TODO: make this configurable at runtime)
 ///
@@ -116,12 +122,13 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
     }
     // debug!("Precomputed SRAs: {:#?}", precomputed_simultaneous_row_activations.iter().take(20).collect::<Vec<_>>());
 
-    let sra_degree_to_rowaddress_combinations=  precomputed_simultaneous_row_activations.iter().fold(HashMap::new(), |mut acc: HashMap<u8, Vec<(RowAddress,RowAddress)>>, (key, vec)| {
-            acc.entry(vec.len() as u8).or_default().push(*key);
+    let sra_degree_to_rowaddress_combinations=  precomputed_simultaneous_row_activations.iter()
+        .fold(HashMap::new(), |mut acc: HashMap<u8, Vec<(RowAddress,RowAddress)>>, (row_combi, activated_rows)| {
+            acc.entry(activated_rows.len() as u8).or_default().push(*row_combi);
             acc
     });
     // output how many combinations of row-addresses activate the given nr of rows
-    debug!("SRAs row-nr to row-addr mapping: {:#?}", sra_degree_to_rowaddress_combinations.iter().map(|(k,v)| format!("{k} rows activated in {} addr-combinations", v.len())).collect::<Vec<String>>());
+    // debug!("SRAs row-nr to row-addr mapping: {:#?}", sra_degree_to_rowaddress_combinations.iter().map(|(k,v)| format!("{k} rows activated in {} addr-combinations", v.len())).collect::<Vec<String>>());
 
     FCDRAMArchitecture {
         nr_subarrays: NR_SUBARRAYS,
@@ -137,7 +144,22 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
 /// - ! must be smaller than `rows_per_subarray * nr_subarrays` (this is NOT checked!)
 pub type RowAddress = i64;
 pub type SubarrayId = i64;
-pub type SuccessRate = f64;
+#[derive(Debug, PartialEq)]
+pub struct SuccessRate(f64);
+
+impl Eq for SuccessRate {}
+
+impl PartialOrd for SuccessRate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other)) // delegate to total_cmp
+    }
+}
+
+impl Ord for SuccessRate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
 
 /// TODO: add field encoding topology of subarrays (to determine which of them share sense-amps)
 pub struct FCDRAMArchitecture {
@@ -155,7 +177,9 @@ pub struct FCDRAMArchitecture {
     pub precomputed_simultaneous_row_activations: HashMap<(RowAddress, RowAddress), Vec<RowAddress>>,
     /// Map degree of SRA (=nr of activated rows by that SRA) to all combinations of RowAddresses which have that degree of SRA
     /// - use to eg restrict the choice of row-addresses for n-ary AND/OR (eg 4-ary AND -> at least activate 8 rows; more rows could be activated when using input replication)
+    /// NOTE: LogicOp determiens success-rate
     pub sra_degree_to_rowaddress_combinations: HashMap<u8, Vec<(RowAddress,RowAddress)>>,
+    // pub sra_degree_to_rowaddress_combinations: HashMap<(u8, LogicOp), BTreeMap<(RowAddress,RowAddress), SuccessRate>>, // to large runtime-overhead :/
     /// Stores for every rows which combinations of RowAddresses activate that row (needed for finding appropriate safe space rows)
     pub row_activated_by_rowaddress_tuple: HashMap<RowAddress, HashSet<(RowAddress, RowAddress)>>,
     /// Given a row-addr this returns the distance of it to the sense-amps (!determinse success-rate of op using that `row` as an operand) (see [1] Chap5.2)
@@ -186,26 +210,30 @@ impl FCDRAMArchitecture {
     ///
     /// NOTE: `compute_rows` are expected to lay in the same subarray and `reference_rows` in one
     /// subarray adjacent to the compute subarray (!this is not checked but assumed to be true!)
-    fn get_instructions_implementation_of_logic_ops(logic_op: SupportedLogicOps) -> Vec<Instruction> {
+    fn get_instructions_implementation_of_logic_ops(logic_op: LogicOp) -> Vec<Instruction> {
         match logic_op {
-            SupportedLogicOps::NOT => vec!(Instruction::APA(-1, -1)),
-            SupportedLogicOps::AND => vec!(Instruction::FracOp(-1), Instruction::APA(-1, -1)),
-            SupportedLogicOps::OR => vec!(Instruction::FracOp(-1), Instruction::APA(-1, -1)),
-            SupportedLogicOps::NAND => {
+            LogicOp::NOT => vec!(Instruction::APA(-1, -1)),
+            LogicOp::AND => vec!(Instruction::FracOp(-1), Instruction::APA(-1, -1)),
+            LogicOp::OR => vec!(Instruction::FracOp(-1), Instruction::APA(-1, -1)),
+            LogicOp::NAND => {
                 // 1. AND, 2. NOT
-                FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(SupportedLogicOps::AND)
+                FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::AND)
                     .into_iter()
-                    .chain( FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(SupportedLogicOps::NOT))
+                    .chain( FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::NOT))
                     .collect()
             },
-            SupportedLogicOps::NOR => {
+            LogicOp::NOR => {
                 // 1. OR, 2. NOT
-                FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(SupportedLogicOps::OR)
+                FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::OR)
                     .into_iter()
-                    .chain( FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(SupportedLogicOps::NOT))
+                    .chain( FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::NOT))
                     .collect()
             }
         }
+    }
+
+    fn get_activated_rows() {
+
     }
 }
 
@@ -318,7 +346,7 @@ impl Instruction {
     ///     - as well as temperature and DRAM speed rate
     ///
     /// TAKEAWAY: `OR` is more reliable than `AND`
-    pub fn get_success_rate_of_apa(&self, implemented_op: SupportedLogicOps) -> SuccessRate {
+    pub fn get_success_rate_of_apa(&self, implemented_op: LogicOp) -> SuccessRate {
 
         // Quote from [1] Chap6.3: "the distance of all simultaneously activated rows" - unclear how this classification happend exactly. Let's be conservative and assume the worst-case behavior
         // (furthest away row for src-operands). For dst-rows we use the one closest to the sense-amps, since we can choose from which of the rows to read/save the result form
@@ -326,7 +354,7 @@ impl Instruction {
         let success_rate_by_row_distance = {
             // see [1] Chap5.3 and Chap6.3
             match implemented_op {
-                SupportedLogicOps::NOT => HashMap::from([
+                LogicOp::NOT => HashMap::from([
                         // ((src,dst), success_rate)
                         ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 51.71),
                         ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 54.93),
@@ -338,7 +366,7 @@ impl Instruction {
                         ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 85.02),
                         ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 75.13),
                     ]),
-                SupportedLogicOps::AND => HashMap::from([
+                LogicOp::AND => HashMap::from([
                         // ((reference,compute), success_rate)
                         ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 98.81),
                         ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.20),
@@ -350,7 +378,7 @@ impl Instruction {
                         ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 95.29),
                         ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 94.95),
                     ]),
-                SupportedLogicOps::OR => HashMap::from([
+                LogicOp::OR => HashMap::from([
                         // ((reference,compute), success_rate)
                         ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 99.51),
                         ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.65),
@@ -362,7 +390,7 @@ impl Instruction {
                         ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 98.59),
                         ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 98.80),
                     ]),
-                SupportedLogicOps::NAND => HashMap::from([
+                LogicOp::NAND => HashMap::from([
                         // ((reference,compute), success_rate)
                         ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 98.81),
                         ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.20),
@@ -374,7 +402,7 @@ impl Instruction {
                         ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 95.19),
                         ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 94.95),
                     ]),
-                SupportedLogicOps::NOR => HashMap::from([
+                LogicOp::NOR => HashMap::from([
                         // ((reference,compute), success_rate)
                         ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 99.51),
                         ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.65),
@@ -414,9 +442,9 @@ impl Instruction {
                     .expect("[ERR] Activated rows were empty");
                 let total_success_rate = *success_rate_per_operandnr.get(&nr_operands).expect("[ERR] {nr_operands} not =2|4|8|16, the given SRA function seems to not comply with this core assumption.")
                     * success_rate_by_row_distance.get(&(furthest_src_row, closest_dst_row)).unwrap();
-                total_success_rate
+                SuccessRate(total_success_rate)
             },
-            _ => 1.0,
+            _ => SuccessRate(1.0),
         }
     }
 }
@@ -424,7 +452,8 @@ impl Instruction {
 /// Contains logical operations which are supported (natively) on FCDRAM-Architecture
 /// - see [`FCDRAMArchitecture::get_instructions_implementation_of_logic_ops`] for how these
 /// logic-ops are mapped to FCDRAM-instructions
-pub enum SupportedLogicOps {
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
+pub enum LogicOp {
     NOT,
     AND,
     OR,

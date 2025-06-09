@@ -179,6 +179,8 @@ pub struct CompilerSettings {
     // /// Location to config-file holding fcdram-specific configs
     // fcdram_config_file: Path,
 
+    /// How many times to issue FracOps to store `V_{DD}/2` in one of the activated rows for AND/OR
+    repetition_fracops: u64,
     /// Nr of rows to use as a safe space for operands per subarray
     /// - REMINDER: after `AND`/`OR`-ops the src-operands are overwritten by the op-result, so to reuse operands they're put into specially designated rows (="safe-space") which won't be overwritten
     /// - Ops reusing those operands have to clone the values from the safe-space prior to issuing the Op
