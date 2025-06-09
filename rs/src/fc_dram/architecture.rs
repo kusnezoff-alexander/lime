@@ -11,6 +11,8 @@ use log::debug;
 
 pub const NR_SUBARRAYS: i64 = 2i64.pow(7);
 pub const ROWS_PER_SUBARRAY: i64 = 2i64.pow(9);
+pub const SUBARRAY_ID_BITMASK: i64 = 0b1_111_111_000_000_000; // 7 highest bits=subarray id
+pub const ROW_ID_BITMASK: i64 = 0b0_000_000_111_111_111; // 7 highest bits=subarray id
 /// Main variable specifying architecture of DRAM-module for which to compile for
 /// - this is currently just an example implementation for testing purpose; (TODO: make this configurable at runtime)
 ///
@@ -135,7 +137,9 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
 /// - ! must be smaller than `rows_per_subarray * nr_subarrays` (this is NOT checked!)
 pub type RowAddress = i64;
 pub type SubarrayId = i64;
+pub type SuccessRate = f64;
 
+/// TODO: add field encoding topology of subarrays (to determine which of them share sense-amps)
 pub struct FCDRAMArchitecture {
     /// Nr of subarrays in a DRAM module
     pub nr_subarrays: i64,
@@ -314,7 +318,7 @@ impl Instruction {
     ///     - as well as temperature and DRAM speed rate
     ///
     /// TAKEAWAY: `OR` is more reliable than `AND`
-    pub fn get_success_rate_of_apa(&self, implemented_op: SupportedLogicOps) -> f64 {
+    pub fn get_success_rate_of_apa(&self, implemented_op: SupportedLogicOps) -> SuccessRate {
 
         // Quote from [1] Chap6.3: "the distance of all simultaneously activated rows" - unclear how this classification happend exactly. Let's be conservative and assume the worst-case behavior
         // (furthest away row for src-operands). For dst-rows we use the one closest to the sense-amps, since we can choose from which of the rows to read/save the result form

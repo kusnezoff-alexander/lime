@@ -174,6 +174,7 @@ pub struct CompilerSettings {
     print_compilation_stats: bool,
     /// Minimal success rate to be guaranteed for success compiled program
     /// REMINDER: FCDRAM-operations dont have a 100%-success rate to create the correct results
+    /// TODO: not used yet by compiler
     min_success_rate: f64,
     // /// Location to config-file holding fcdram-specific configs
     // fcdram_config_file: Path,

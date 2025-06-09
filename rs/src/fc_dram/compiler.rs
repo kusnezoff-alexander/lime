@@ -10,19 +10,12 @@
 use crate::ambit::Architecture;
 
 use super::{
-    architecture::{FCDRAMArchitecture, Instruction, SubarrayId, ARCHITECTURE, NR_SUBARRAYS, ROWS_PER_SUBARRAY}, optimization::optimize, CompilerSettings, Program, ProgramState, RowAddress
+    architecture::{FCDRAMArchitecture, Instruction, SubarrayId, ARCHITECTURE, NR_SUBARRAYS, ROWS_PER_SUBARRAY, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, ProgramState, RowAddress
 };
-use eggmock::{Aig, AigLanguage, ComputedNetworkWithBackwardEdges, Id, NetworkWithBackwardEdges, Node, Signal};
+use eggmock::{Aig, AigLanguage, ComputedNetworkWithBackwardEdges, Id, NetworkLanguage, NetworkWithBackwardEdges, Node, Signal};
 use log::debug;
 use priority_queue::PriorityQueue;
 use std::{cmp::Ordering, collections::{BinaryHeap, HashMap, HashSet}};
-
-
-pub fn place_signals_onto_rows(
-    comp_state: &mut impl NetworkWithBackwardEdges<Node = Aig>, signals: Vec<Id>
-) {
-
-}
 
 pub struct Compiler {
     /// compiler-options set by user
@@ -105,6 +98,7 @@ impl Compiler {
     }
 
     /// Allocates safe-space rows inside the DRAM-module
+    /// - NOTE: nr of safe-space rows must be a power of 2 (x) between 1<=x<=64
     /// - [ ] TODO: improve algo (in terms of space efficiency)
     fn alloc_safe_space_rows(&mut self, nr_safe_space_rows: u8) {
 
@@ -114,17 +108,17 @@ impl Compiler {
         }
 
         // TODO: this is just a quick&dirty implementation. Solving this (probably NP-complete) problem of finding optimal safe-space rows is probably worth solving for every DRAM-module once
-        let safe_space_rows = {
+        self.safe_space_rows = {
 
             // choose any row-addr combi activating exactly `nr_safe_space_rows` and choose all that activated rows to be safe-space rows
             let chosen_row_addr_combi = ARCHITECTURE.sra_degree_to_rowaddress_combinations
                 .get(&nr_safe_space_rows).unwrap()
                 .first().unwrap(); // just take the first row-combi that activates `nr_safe_space_rows`
-            ARCHITECTURE.precomputed_simultaneous_row_activations.get(chosen_row_addr_combi).unwrap()
+            ARCHITECTURE.precomputed_simultaneous_row_activations.get(chosen_row_addr_combi).unwrap().to_vec()
         };
 
         // deactivate all combination which could activate safe-space rows
-        for row in safe_space_rows {
+        for row in self.safe_space_rows.iter() {
             for row_combi in ARCHITECTURE.row_activated_by_rowaddress_tuple.get(row).unwrap() {
                 self.blocked_row_combinations.insert(*row_combi);
             }
@@ -135,20 +129,26 @@ impl Compiler {
     /// TODO: algo which looks ahead which input-row-placement might be optimal (->reduce nr of move-ops to move intermediate results around & keep inputs close to sense-amps
     /// TODO: parititon logic network into subgraphs s.t. subgraphs can be mapped onto subarrays reducing nr of needed moves
     fn place_inputs(&mut self, mut inputs: Vec<Id>) {
-        // naive implementation: start placing input just on consecutive rows
+        // naive implementation: start placing input on consecutive safe-space rows (continuing with next subarray once the current subarray has no more free safe-space rows)
         // TODO: change input operand placement to be more optimal (->taking into account future use of those operands)
-        for subarray in 0..NR_SUBARRAYS {
-            for row in self.safe_space_rows.iter() {
-                // TODO  allocate safe-space rows
-                if let Some(next_input) = inputs.pop() {
-                    let initial_row_state = RowState { is_compute_row: false, live_value: Some(next_input)};
-                    let initial_value_state = ValueState { is_computed: true, row_location: Some((subarray, *row))};
-                    self.comp_state.dram_state.insert((subarray, *row), initial_row_state);
-                    self.comp_state.value_states.insert(next_input, initial_value_state);
-                } else {
-                    return;
-                }
-            }
+        let mut subarray_iter=0..NR_SUBARRAYS;
+        let next_subarray = subarray_iter.next().unwrap();
+        let mut row_iter= self.safe_space_rows.iter();
+        while let Some(next_input) = inputs.pop() {
+            let (next_subarray, next_row) = if let Some(next_row) = row_iter.next() {
+                (next_subarray, next_row)
+            } else {
+                row_iter = self.safe_space_rows.iter();
+                ( subarray_iter.next().expect("OOM: no more safe-space rows and subarrays available") , row_iter.next().expect("No safe-space rows available" ))
+            };
+
+
+            let row_address = (next_subarray << ROWS_PER_SUBARRAY.ilog2() ) | next_row; // higher bits=id of subarray
+
+            let initial_row_state = RowState { is_compute_row: false, live_value: Some(next_input)};
+            let initial_value_state = ValueState { is_computed: true, row_location: Some(row_address)};
+            self.comp_state.dram_state.insert(row_address, initial_row_state);
+            self.comp_state.value_states.insert(next_input, initial_value_state);
         }
     }
 
@@ -175,8 +175,28 @@ impl Compiler {
         self.alloc_safe_space_rows(self.settings.safe_space_rows_per_subarray);
         // 0.2 Place all inputs and mark them as being live
         self.place_inputs( network.leaves().collect::<Vec<Id>>() ); // place input-operands into rows
+        debug!("Placed inputs {:?} in {:?}", network.leaves().collect::<Vec<Id>>(), self.comp_state.value_states);
         // 0.3 Setup: store all network-nodes yet to be compiled
         self.initialize_candidates(network);
+    }
+
+    /// Return id of subarray to use for computation and reference (compute_subarrayid, reference_subarrayid)
+    /// - based on location of input rows AND current compilation state
+    /// - [ ] POSSIBLE EXTENSION: include lookahead for future ops and their inputs they depend on
+    fn select_compute_and_ref_subarray(&self, input_rows: Vec<RowAddress>) -> (SubarrayId, SubarrayId) {
+        // naive implementation: just use the subarray that most of the `input_rows` reside in
+        // TODO: find better solution
+        let used_subarray_ids = input_rows.into_iter().map(|row| row & SUBARRAY_ID_BITMASK);
+        let (&mostly_used_subarray_id, _) = used_subarray_ids
+                .fold(HashMap::new(), |mut acc, item| {
+                            *acc.entry(item).or_insert(0) += 1;
+                            acc
+                        })
+                .iter().max_by_key(|&(_, count)| count).unwrap();
+
+        let selected_ref_subarray = (mostly_used_subarray_id+1) % NR_SUBARRAYS; // TODO: use 2D-layout of subarrays to determine which of them share sense-amps
+
+        (mostly_used_subarray_id, selected_ref_subarray)
     }
 
     /// - [ ] make sure that operation to be executed on those rows won't simultaneously activate other rows holding valid data which will be used by future operations
@@ -187,17 +207,46 @@ impl Compiler {
             .collect();
 
         let nr_operands = src_operands.len(); // use to select SRA to activate
-        // 1. Make sure rows are placed appropriately in the rows to be simultaneously activated (starting from inputs)
+        let nr_rows = nr_operands.next_power_of_two();
 
-        // 1.1 Determine in which rows src-operands for the next candidate-op are located
+        let src_rows: Vec<RowAddress> = src_operands.iter()
+            .map(|src_operand| {
 
-        // 1.2 Check if issuing `APA(src1,src2)` would activate other rows which hold valid data
-        // 1.2.1 if yes: move data to other rows for performing this op
+                debug!("src: {src_operand:?}");
+                self.comp_state.value_states.get(src_operand)
+                    .unwrap()
+                    .row_location
+                    .expect("Sth went wrong... if the src-operand is not in a row, then this candidate shouldn't have been added to the list of candidates")
+            })
+            .collect();
 
-        // 1.3 Prepare performing the actual op (setup reference subarray)
-        // 1.3.1 If activated rows in reference subarray holds valid data: spill to other rows
+        let (compute_subarray, ref_subarray) = self.select_compute_and_ref_subarray(src_rows);
+        let language_op = network.node(*next_candidate);
 
-        // 1.4 Issue actual operation
+        // match language_op {
+        //     Aig::And()
+        //             }
+
+        // 0. Select an SRA (=row-address tuple) for the selected subarray based on highest success-rate
+        // TODO (possible improvement): input replication by choosing SRA with more activated rows than operands and duplicating operands which are in far-away rows into several rows?)
+        let (row1,row2) = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&(nr_rows as u8)).unwrap()
+            // TODO: sort by success-rate
+            .first().expect("No SRA for nr-rows={nr_rows}");
+
+        // 1. Initialize rows in ref-subarray (if executing AND/OR)
+        // - TODO: read nr of frac-ops to issue from compiler-settings
+
+        // 2. Place rows in the simultaneously activated rows in the compute subarray (init other rows with 0 for OR, 1 for AND and same value for NOT)
+
+
+        // SKIPPED: 2.2 Check if issuing `APA(src1,src2)` would activate other rows which hold valid data
+        // - only necessary once we find optimization to not write values to safe-space but reuse them diectly
+        // 2.2.1 if yes: move data to other rows for performing this op
+
+        // 3. Issue actual operation
+
+        // 4. Copy result data from dst NEAREST to the sense-amps into a safe-space row
+        // TODO: possible improvement - error correction over all dst-rows (eg majority-vote for each bit, votes weighted by distance to sense-amps?)
 
         vec!()
     }
@@ -241,19 +290,20 @@ pub struct RowState {
     live_value: Option<Id>,
 }
 
+#[derive(Debug)]
 pub struct ValueState {
     /// Whether the value has already been computed (->only then it could reside in a row)
     /// - the value could also have been computed but spilled already on its last use
     /// - helps determining whether src-operand is the last use: for all other output operands of that source operand just check whether they have been already computed
     is_computed: bool,
     /// Row in which the value resides
-    row_location: Option<(SubarrayId, RowAddress)>,
+    row_location: Option<RowAddress>,
 }
 
 /// Keep track of current progress of the compilation (eg which rows are used, into which rows data is placed, ...)
 pub struct CompilationState {
     /// For each row in the dram-module store its state
-    dram_state: HashMap<(SubarrayId, RowAddress), RowState>,
+    dram_state: HashMap<RowAddress, RowState>,
     /// Stores row in which an intermediate result (which is still to be used by future ops) is currently located (or whether it has been computed at all)
     value_states: HashMap<Id, ValueState>,
     /// List of candidates (ops ready to be issued) prioritized by some metric by which they are scheduled for execution
@@ -262,7 +312,7 @@ pub struct CompilationState {
 }
 
 impl CompilationState {
-    pub fn new(dram_state: HashMap<(SubarrayId, RowAddress), RowState>) -> Self {
+    pub fn new(dram_state: HashMap<RowAddress, RowState>) -> Self {
         Self {
             dram_state,
             value_states: HashMap::new(),
@@ -371,6 +421,15 @@ mod tests {
     }
 
     #[test] // mark function as test-fn
+    fn test_alloc_safe_space_rows() {
+        let mut compiler = init();
+        const REQUESTED_SAFE_SPACE_ROWS: u8 = 8;
+        compiler.alloc_safe_space_rows(REQUESTED_SAFE_SPACE_ROWS);
+
+        assert_eq!(compiler.safe_space_rows.len(), REQUESTED_SAFE_SPACE_ROWS as usize);
+    }
+
+    #[test] // mark function as test-fn
     fn test_candidate_initialization() {
         let mut compiler = init();
 
@@ -427,5 +486,12 @@ mod tests {
         let scheduling_prio = compiler.compute_scheduling_prio_for_node(eggmock::Id::from(4),  &ntk_backward);
         assert_eq!(scheduling_prio, SchedulingPrio { nr_last_value_uses: 2, nr_src_operands: 2, nr_result_operands: 1 }  );
 
+    }
+
+    #[test]
+    fn test_select_compute_and_ref_subarray() {
+        let compiler = init();
+        let (selected_subarray, _) = compiler.select_compute_and_ref_subarray(vec!(0b1_000_000_000, 0b1_000_010_000, 0b111_000_000_000, 0b10_100_000_000,));
+        assert_eq!(selected_subarray, 0b1_000_000_000);
     }
 }
