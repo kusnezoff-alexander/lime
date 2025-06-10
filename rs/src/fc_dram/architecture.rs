@@ -5,10 +5,7 @@
 //!
 //! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of RowAddress
 
-use std::{cmp::Ordering, collections::{BTreeMap, HashMap, HashSet}, fmt::{Display, Formatter}, sync::LazyLock};
-
-use log::debug;
-use priority_queue::PriorityQueue;
+use std::{cmp::Ordering, collections::{HashMap, HashSet}, fmt::{Display, Formatter}, sync::LazyLock};
 
 pub const NR_SUBARRAYS: i64 = 2i64.pow(7);
 pub const ROWS_PER_SUBARRAY: i64 = 2i64.pow(9);
@@ -283,6 +280,7 @@ pub enum Instruction {
 
 impl Display for Instruction {
  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+     // TODO: change string-representation to display subarray-id
         let description = match self {
             Instruction::FracOp(row) => format!("AP({row})"),
             Instruction::APA(row1,row2) => format!("APA({row1},{row2})"),
