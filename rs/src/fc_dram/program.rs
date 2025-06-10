@@ -2,7 +2,7 @@
 //! compiling given logic-network (see [`compilation`]) and potentially adding some manual
 //! optimizations ([`optimization`])
 use super::architecture::{FCDRAMArchitecture, RowAddress};
-use crate::fc_dram::architecture::Instruction;
+use crate::fc_dram::architecture::{get_subarrayid_from_rowaddr, Instruction, ROW_ID_BITMASK};
 use eggmock::{Id, Aig, NetworkWithBackwardEdges, Signal};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -32,10 +32,12 @@ impl Program {
 /// Print the generated program in human-readable form
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let display_row = |row| { format!("{}.{}", get_subarrayid_from_rowaddr(row), row & ROW_ID_BITMASK)}; // display subarray separately
+
         writeln!(f, "---------------------------------------")?;
         writeln!(f, "Input operand placement:")?;
         for (signal, row) in &self.input_row_operands_placement {
-            writeln!(f, "{:?} in {}", signal, row)?;
+            writeln!(f, "{:?} in {}", signal, display_row(*row))?;
         }
         writeln!(f, "---------------------------------------")?;
 
@@ -47,7 +49,7 @@ impl Display for Program {
         writeln!(f, "---------------------------------------")?;
         writeln!(f, "Output operand placement:")?;
         for (signal, row) in &self.output_row_operands_placement{
-            writeln!(f, "{:?} in {}", signal, row)?;
+            writeln!(f, "{:?} in {}", signal, display_row(*row))?;
         }
         writeln!(f, "---------------------------------------")?;
         Ok(())

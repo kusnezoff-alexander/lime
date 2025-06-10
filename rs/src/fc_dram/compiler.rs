@@ -7,7 +7,7 @@
 //! - [`Compiler::compile()`] = main function - compiles given logic network for the given [`architecture`] into a [`program`] using some [`optimization`]
 
 use super::{
-    architecture::{subarrayid_to_subarray_address, Instruction, LogicOp, SubarrayId, ARCHITECTURE, NR_SUBARRAYS, ROWS_PER_SUBARRAY, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
+    architecture::{subarrayid_to_subarray_address, Instruction, LogicOp, SubarrayId, ARCHITECTURE, NR_SUBARRAYS, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
 };
 use eggmock::{Aig, Id, NetworkWithBackwardEdges, Node, Signal};
 use itertools::Itertools;
@@ -114,7 +114,9 @@ impl Compiler {
             let chosen_row_addr_combi = ARCHITECTURE.sra_degree_to_rowaddress_combinations
                 .get(&nr_safe_space_rows).unwrap()
                 .first().unwrap(); // just take the first row-combi that activates `nr_safe_space_rows`
-            ARCHITECTURE.precomputed_simultaneous_row_activations.get(chosen_row_addr_combi).unwrap().to_vec()
+            ARCHITECTURE.precomputed_simultaneous_row_activations.get(chosen_row_addr_combi).unwrap()
+                .iter().map(|row| row & ROW_ID_BITMASK) // reset subarray-id to all 0s
+                .collect()
         };
 
         // deactivate all combination which could activate safe-space rows
@@ -603,7 +605,8 @@ mod tests {
         const REQUESTED_SAFE_SPACE_ROWS: u8 = 8;
         compiler.alloc_safe_space_rows(REQUESTED_SAFE_SPACE_ROWS);
 
-        assert_eq!(compiler.safe_space_rows.len(), REQUESTED_SAFE_SPACE_ROWS as usize);
+        debug!("{:?}", compiler.safe_space_rows);
+        assert_eq!(compiler.safe_space_rows.iter().dedup().collect::<Vec<&RowAddress>>().len(), REQUESTED_SAFE_SPACE_ROWS as usize);
     }
 
     #[test] // mark function as test-fn

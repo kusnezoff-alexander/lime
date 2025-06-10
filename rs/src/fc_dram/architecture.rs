@@ -7,13 +7,18 @@
 
 use std::{cmp::Ordering, collections::{HashMap, HashSet}, fmt::{Display, Formatter}, sync::LazyLock};
 
-pub const NR_SUBARRAYS: i64 = 2i64.pow(7);
-pub const ROWS_PER_SUBARRAY: i64 = 2i64.pow(9);
-pub const SUBARRAY_ID_BITMASK: i64 = 0b1_111_111_000_000_000; // 7 highest bits=subarray id
-pub const ROW_ID_BITMASK: i64 = 0b0_000_000_111_111_111; // 7 highest bits=subarray id
+pub const NR_SUBARRAYS: u64 = 2u64.pow(7);
+pub const ROWS_PER_SUBARRAY: u64 = 2u64.pow(9);
+pub const SUBARRAY_ID_BITMASK: u64 = 0b1_111_111_000_000_000; // 7 highest bits=subarray id
+pub const ROW_ID_BITMASK: u64 = 0b0_000_000_111_111_111; // 7 highest bits=subarray id
 
+// some utility functions
 pub fn subarrayid_to_subarray_address(subarray_id: SubarrayId) -> RowAddress {
-    subarray_id << NR_SUBARRAYS.ilog2()
+    subarray_id << ROWS_PER_SUBARRAY.ilog2() // lower bits=rows in subarray
+}
+
+pub fn get_subarrayid_from_rowaddr(row: RowAddress) -> SubarrayId {
+    (row & SUBARRAY_ID_BITMASK) >> NR_SUBARRAYS.ilog2()
 }
 
 /// Main variable specifying architecture of DRAM-module for which to compile for
@@ -139,8 +144,8 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
 });
 
 /// - ! must be smaller than `rows_per_subarray * nr_subarrays` (this is NOT checked!)
-pub type RowAddress = i64;
-pub type SubarrayId = i64;
+pub type RowAddress = u64;
+pub type SubarrayId = u64;
 #[derive(Debug, PartialEq)]
 pub struct SuccessRate(f64);
 
@@ -161,9 +166,9 @@ impl Ord for SuccessRate {
 /// TODO: add field encoding topology of subarrays (to determine which of them share sense-amps)
 pub struct FCDRAMArchitecture {
     /// Nr of subarrays in a DRAM module
-    pub nr_subarrays: i64,
+    pub nr_subarrays: u64,
     /// Nr of rows in a single subarray
-    pub rows_per_subarray: i64,
+    pub rows_per_subarray: u64,
     /// Returns all activated rows when issuing `APA(row1, row2)`
     /// - NOTE: `row1`,`row2` are expected to reside in adjacent subarrays
     /// - NOTE: the simultaneously activated rows are expected to have the same addresses in both subarrays
@@ -209,9 +214,9 @@ impl FCDRAMArchitecture {
     /// subarray adjacent to the compute subarray (!this is not checked but assumed to be true!)
     fn get_instructions_implementation_of_logic_ops(logic_op: LogicOp) -> Vec<Instruction> {
         match logic_op {
-            LogicOp::NOT => vec!(Instruction::APA(-1, -1)),
-            LogicOp::AND => vec!(Instruction::FracOp(-1), Instruction::APA(-1, -1)),
-            LogicOp::OR => vec!(Instruction::FracOp(-1), Instruction::APA(-1, -1)),
+            LogicOp::NOT => vec!(Instruction::APA(0, 0)),
+            LogicOp::AND => vec!(Instruction::FracOp(0), Instruction::APA(0, 0)),
+            LogicOp::OR => vec!(Instruction::FracOp(0), Instruction::APA(0, 0)),
             LogicOp::NAND => {
                 // 1. AND, 2. NOT
                 FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::AND)
@@ -279,17 +284,20 @@ pub enum Instruction {
 }
 
 impl Display for Instruction {
- fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-     // TODO: change string-representation to display subarray-id
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let display_row = |row| { format!("{}.{}", get_subarrayid_from_rowaddr(row), row & ROW_ID_BITMASK)}; // display subarray separately
+        // TODO: change string-representation to display subarray-id
         let description = match self {
-            Instruction::FracOp(row) => format!("AP({row})"),
-            Instruction::APA(row1,row2) => format!("APA({row1},{row2})"),
-            Instruction::RowCloneFPM(row1,row2) => format!("AA({row1},{row2})"),
-            Instruction::RowClonePSM(row1,row2) => format!("
-                TRANSFER(<this_bank>{row1},<other_bank>(rowX))
-                TANSFER(<other_bank>rowX,<this_bank>{row2})
-            "),
-        };
+            Instruction::FracOp(row) => format!("AP({})", display_row(*row)),
+            Instruction::APA(row1,row2) => format!("APA({},{})", display_row(*row1), display_row(*row2)),
+            Instruction::RowCloneFPM(row1, row2) => format!("AA({},{})", display_row(*row1), display_row(*row2)),
+            Instruction::RowClonePSM(row1, row2) => format!("
+                TRANSFER(<this_bank>{},<other_bank>(rowX))
+                TANSFER(<other_bank>rowX,<this_bank>{})
+                ",
+                display_row(*row1),
+                display_row(*row2)
+        )};
         write!(f, "{}", description)
     }
 }
@@ -473,3 +481,17 @@ pub trait RowDecoder {
     // N:2N: is supported and let `get_simultaneously_activated_rows_of_apa_op()` handle the rest?
 }
 
+
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    // fn init() {
+    // }
+
+    #[test] // mark function as test-fn
+    fn test_sra() {
+        println!("{:?}", ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&8).unwrap().first());
+    }
+}
