@@ -4,19 +4,18 @@
 //!         - also see [`RowState`]
 //! - [`SchedulingPrio`] = used to prioritize/order instruction for Instruction Scheduling
 //!
-//! - [`compile()`] = main function - compiles given logic network for the given [`architecture`]
-//! into a [`program`] using some [`optimization`]
+//! - [`Compiler::compile()`] = main function - compiles given logic network for the given [`architecture`] into a [`program`] using some [`optimization`]
 
 use super::{
-    architecture::{subarrayid_to_subarray_address, FCDRAMArchitecture, Instruction, LogicOp, SubarrayId, ARCHITECTURE, NR_SUBARRAYS, ROWS_PER_SUBARRAY, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
+    architecture::{subarrayid_to_subarray_address, Instruction, LogicOp, SubarrayId, ARCHITECTURE, NR_SUBARRAYS, ROWS_PER_SUBARRAY, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
 };
-use eggmock::{Aig, AigLanguage, ComputedNetworkWithBackwardEdges, Id, NetworkLanguage, NetworkWithBackwardEdges, Node, Signal};
+use eggmock::{Aig, Id, NetworkWithBackwardEdges, Node, Signal};
 use itertools::Itertools;
 use log::debug;
 use priority_queue::PriorityQueue;
-use rustc_hash::FxHashMap;
 use std::{cmp::Ordering, collections::{HashMap, HashSet}};
 
+/// Provides [`Compiler::compile()`] to compile a logic network into a [`Program`]
 pub struct Compiler {
     /// compiler-options set by user
     settings: CompilerSettings,
@@ -60,11 +59,6 @@ impl Compiler {
         // 0. Prepare compilation: select safe-space rows, place inputs into DRAM module (and store where inputs have been placed in `program`)
         self.init_comp_state(network, &mut program);
 
-        // TODO: how to get src-operands of `outputs` ??
-        // debug!("{:?}", network.node_outputs(outputs.next()).collect());
-        // TODO: get src-operands of outputs and place them appropriately (with knowledge about output
-        // operands!)
-
         // start with inputs
         let primary_inputs = network.leaves();
         debug!("Primary inputs: {:?}", primary_inputs.collect::<Vec<Id>>());
@@ -96,9 +90,10 @@ impl Compiler {
 
         // store output operand location so user can retrieve them after running the program
         let outputs = network.outputs();
-        program.output_row_operands_placement = outputs.map(|out| {
-            (out, self.comp_state.value_states.get(&out).unwrap().row_location.expect("ERROR: one of the outputs hasn't been computed yet..."))
-        }).collect();
+        // TODO: doesn't work yet
+        // program.output_row_operands_placement = outputs.map(|out| {
+        //     (out, self.comp_state.value_states.get(&out).unwrap().row_location.expect("ERROR: one of the outputs hasn't been computed yet..."))
+        // }).collect();
         program
     }
 
@@ -154,29 +149,13 @@ impl Compiler {
     fn place_inputs(&mut self, mut inputs: Vec<Id>) {
         // naive implementation: start placing input on consecutive safe-space rows (continuing with next subarray once the current subarray has no more free safe-space rows)
         // TODO: change input operand placement to be more optimal (->taking into account future use of those operands)
-        let mut subarray_iter=0..NR_SUBARRAYS;
-        let next_subarray = subarray_iter.next().unwrap();
-        let subarray_addr = subarrayid_to_subarray_address(next_subarray);
         while let Some(next_input) = inputs.pop() {
-            let mut row_iter= self.safe_space_rows.iter()
-                .filter(|row| ! self.comp_state.constant_values.values().contains( &(subarray_addr | **row)) ); // filter safe-space rows which are NOT already used for constants
             // NOTE: some safe-space rows are reserved for constants
-            let (next_subarray, next_row) = if let Some(next_row) = row_iter.next() {
-                (next_subarray, next_row)
-            } else {
-                let next_subarray = subarray_iter.next().expect("OOM: no more safe-space rows and subarrays available");
-                let next_subarray_addr = subarrayid_to_subarray_address(next_subarray);
-                let mut row_iter = self.safe_space_rows.iter()
-                    .filter(|row| ! self.comp_state.constant_values.values().contains(&(next_subarray_addr | **row )) ); // filter safe-space rows which are NOT already used for constants
-                ( next_subarray, row_iter.next().expect("OOM: No safe-space rows available" ) )
-            };
-
-
-            let row_address = (next_subarray << ROWS_PER_SUBARRAY.ilog2() ) | next_row; // higher bits=id of subarray
+            let free_safespace_row = self.get_next_free_safespace_row(None);
 
             let initial_row_state = RowState { is_compute_row: false, live_value: Some(Signal::new(next_input, false)), constant: None };
-            let initial_value_state = ValueState { is_computed: true, row_location: Some(row_address) };
-            self.comp_state.dram_state.insert(row_address, initial_row_state);
+            let initial_value_state = ValueState { is_computed: true, row_location: Some(free_safespace_row) };
+            self.comp_state.dram_state.insert(free_safespace_row, initial_row_state);
             self.comp_state.value_states.insert(Signal::new(next_input, false), initial_value_state);
         }
     }
@@ -380,7 +359,7 @@ impl Compiler {
         for subarray in subarray_order {
             for row in &self.safe_space_rows {
                 let row_addr = row | subarrayid_to_subarray_address(subarray);
-                if self.comp_state.dram_state.contains_key(&row_addr) ||  self.comp_state.dram_state.get(&row_addr).unwrap().live_value.is_none() {
+                if self.comp_state.dram_state.get(&row_addr).unwrap_or(&RowState::default()).live_value.is_none() { // NOTE: safe-space rows are inserted lazily into `dram_state`
                     return row_addr;
                 }
             }
@@ -510,6 +489,16 @@ pub struct RowState {
     constant: Option<usize>,
 }
 
+impl Default for RowState {
+    fn default() -> Self {
+        RowState {
+            is_compute_row: false,
+            live_value: None,
+            constant: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ValueState {
     /// Whether the value has already been computed (->only then it could reside in a row)
@@ -581,7 +570,7 @@ impl PartialOrd for SchedulingPrio {
 #[cfg(test)]
 mod tests {
     use eggmock::egg::{self, EGraph, Extractor, RecExpr};
-    use eggmock::Network;
+    use eggmock::{AigLanguage, ComputedNetworkWithBackwardEdges, Network};
 
     use crate::fc_dram::egraph_extraction::CompilingCostFunction;
 
