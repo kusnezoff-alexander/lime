@@ -88,11 +88,10 @@ impl Instruction {
         &self,
         architecture: &'a Architecture,
     ) -> impl Iterator<Item = Row> + 'a {
-        let first = match self {
+        let first = *match self {
             Instruction::AP(a) => a,
             Instruction::AAP(a, _) => a,
-        }
-        .clone();
+        };
         let first = match first {
             Address::Bitwise(BitwiseAddress::Multiple(idx)) => {
                 architecture.multi_activations[idx].as_slice()

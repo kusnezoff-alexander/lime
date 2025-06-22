@@ -98,7 +98,7 @@ impl<A: Analysis<MigLanguage>> OptCostFunction<MigLanguage, A> for CompilingCost
     {
         // detect self-cycles, other cycles will be detected by compiling, which will result in an
         // error
-        if enode.children().iter().any(|id| *id == eclass.id) {
+        if enode.children().contains(&eclass.id) {
             return None;
         }
         let root = enode.clone();

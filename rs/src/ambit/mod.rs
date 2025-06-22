@@ -164,12 +164,7 @@ fn compiling_receiver<'a>(
             graph,
             |graph| {
                 let start_time = Instant::now();
-                let extractor = OptExtractor::new(
-                    &graph,
-                    CompilingCostFunction {
-                        architecture: &architecture,
-                    },
-                );
+                let extractor = OptExtractor::new(graph, CompilingCostFunction { architecture });
                 t_extractor = start_time.elapsed().as_millis();
                 OptExtractionNetwork(extractor, outputs)
             },
@@ -229,7 +224,7 @@ extern "C" fn ambit_rewrite_ffi(
     receiver: MigReceiverFFI<()>,
 ) -> MigReceiverFFI<CompilerStatistics> {
     let receiver =
-        compiling_receiver(&*&ARCHITECTURE, REWRITE_RULES.as_slice(), settings).map(|res| {
+        compiling_receiver(&ARCHITECTURE, REWRITE_RULES.as_slice(), settings).map(|res| {
             res.output.borrow_ntk().send(receiver);
             CompilerStatistics::from_result(res)
         });
@@ -238,7 +233,7 @@ extern "C" fn ambit_rewrite_ffi(
 
 #[no_mangle]
 extern "C" fn ambit_compile_ffi(settings: CompilerSettings) -> MigReceiverFFI<CompilerStatistics> {
-    let receiver = compiling_receiver(&*&ARCHITECTURE, REWRITE_RULES.as_slice(), settings)
+    let receiver = compiling_receiver(&ARCHITECTURE, REWRITE_RULES.as_slice(), settings)
         .map(CompilerStatistics::from_result);
     MigReceiverFFI::new(receiver)
 }

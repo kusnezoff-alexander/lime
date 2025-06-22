@@ -71,10 +71,8 @@ impl<'g, CF: OptCostFunction<L, A>, L: Language, A: Analysis<L>> OptExtractor<'g
 
     fn opt_node_cost(&mut self, node: &L, class: &EClass<L, A::Data>) -> Option<CF::Cost> {
         if node.all(|id| self.costs.contains_key(&id)) {
-            let res = self
-                .cost_fn
-                .cost(class, node, |id| self.costs[&self.graph.find(id)].0.clone());
-            res
+            self.cost_fn
+                .cost(class, node, |id| self.costs[&self.graph.find(id)].0.clone())
         } else {
             None
         }
