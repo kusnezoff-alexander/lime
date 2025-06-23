@@ -75,13 +75,9 @@ impl Compiler {
                 let executed_instructions = &mut self.execute_next_instruction(&next_candidate, network);
                 program.instructions.append(executed_instructions);
 
-                // update new candidates
-                let new_candidates: PriorityQueue<Signal, SchedulingPrio> = network.node_outputs(next_candidate.node_id())
-                    .filter({|out| network.node(*out).inputs().iter()
-                        .all( |input| self.comp_state.value_states.keys().contains(&Signal::new(input.node_id(), false)) &&  self.comp_state.value_states.get(&Signal::new(input.node_id(), false)).unwrap().is_computed )
-                    })
-                    .map(|id| (Signal::new(id, false), self.compute_scheduling_prio_for_node(Signal::new(id, false), network)))
-                    .collect();
+                // update new candidates (`next_candidate` is now available)
+                let new_candidates = self.get_new_candidates(network, next_candidate);
+                debug!("New candidates: {:?}", new_candidates);
 
                 self.comp_state.candidates.extend(new_candidates);
         }
@@ -91,9 +87,9 @@ impl Compiler {
         // store output operand location so user can retrieve them after running the program
         let outputs = network.outputs();
         // TODO: doesn't work yet
-        // program.output_row_operands_placement = outputs.map(|out| {
-        //     (out, self.comp_state.value_states.get(&out).unwrap().row_location.expect("ERROR: one of the outputs hasn't been computed yet..."))
-        // }).collect();
+        program.output_row_operands_placement = outputs.map(|out| {
+            (out, self.comp_state.value_states.get(&out).unwrap().row_location.expect("ERROR: one of the outputs hasn't been computed yet..."))
+        }).collect();
         program
     }
 
@@ -163,7 +159,7 @@ impl Compiler {
     }
 
     /// Initialize candidates with all nodes that are computable
-    fn initialize_candidates(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aig>) {
+    fn init_candidates(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aig>) {
         let inputs: Vec<Id> = network.leaves().collect();
 
         // init candidates with all nodes having only inputs as src-operands
@@ -181,6 +177,22 @@ impl Compiler {
         }
     }
 
+    /// Returns list of candidates that can be computed once `computed_node` is available
+    fn get_new_candidates(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aig>, computed_node: Signal) -> PriorityQueue<Signal, SchedulingPrio> {
+        debug!("Candidates: {:?}", self.comp_state.candidates);
+        debug!("DRAM state: {:?}", self.comp_state.value_states);
+        network.node_outputs(computed_node.node_id())
+            // filter for new nodes that have all their input-operands available now (->only inputs of computed nodes could have changed to candidate-state, other nodes remain uneffected)
+            .filter({|out| network.node(*out).inputs().iter()
+                .all( |input| {
+                    debug!("Out: {:?}, In: {:?}", out, input);
+                    self.comp_state.value_states.keys().contains(input) &&  self.comp_state.value_states.get(input).unwrap().is_computed
+                })
+            })
+            .map(|id| (Signal::new(id, false), self.compute_scheduling_prio_for_node(Signal::new(id, false), network))) // TODO: check if inverted signal is required as well!
+            .collect()
+    }
+
     /// Initialize compilation state: mark unsuable rows (eg safe-space rows), place input operands
     fn init_comp_state(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aig>, program: &mut Program) {
         // debug!("Compiling {:?}", network);
@@ -192,9 +204,9 @@ impl Compiler {
         self.place_inputs( network.leaves().collect::<Vec<Id>>() ); // place input-operands into rows
         debug!("Placed inputs {:?} in {:?}", network.leaves().collect::<Vec<Id>>(), self.comp_state.value_states);
         // 0.3 Setup: store all network-nodes yet to be compiled
-        self.initialize_candidates(network);
+        self.init_candidates(network);
 
-        // store where inputs have been placed in program
+        // store where inputs have been placed in program for user to know where to put them when calling into this program
         program.input_row_operands_placement = network.leaves().collect::<Vec<Id>>()
             .iter()
             .flat_map(|&id| {
@@ -436,9 +448,10 @@ impl Compiler {
         next_instructions.push(Instruction::APA(row_combi.0, row_combi.1));
         for (&comp_row, &ref_row) in comp_rows.iter().zip(ref_rows.iter()) {
             self.comp_state.dram_state.insert(comp_row, RowState { is_compute_row: true, live_value: Some(*next_candidate), constant: None });
+            self.comp_state.value_states.insert(*next_candidate, ValueState { is_computed: true, row_location: Some(comp_row) });
             // ref subarray holds negated value afterwarsd
             self.comp_state.dram_state.insert(ref_row, RowState { is_compute_row: true, live_value: Some(next_candidate.invert()), constant: None });
-            // TODO: `value_state`
+            self.comp_state.value_states.insert(next_candidate.invert(), ValueState { is_computed: true, row_location: Some(ref_row) });
         }
 
         // 4. Copy result data from dst NEAREST to the sense-amps into a safe-space row and update `value_state`
@@ -482,6 +495,7 @@ impl Compiler {
 }
 
 /// Stores the current state of a row at a concrete compilations step
+#[derive(Default)] // by default not a compute_row, no live-value and no constant inside row
 pub struct RowState {
     /// True iff that row is currently: 1) Not a safe-sapce row, 2) Doesn't activate any safe-sapce rows, 3) Isn't holding valid values in the role of a reference-subarray row
     is_compute_row: bool,
@@ -489,16 +503,6 @@ pub struct RowState {
     live_value: Option<Signal>,
     /// Some rows (mostly only safe-space rows) store constants values, see [`CompilationState::constant_values`]
     constant: Option<usize>,
-}
-
-impl Default for RowState {
-    fn default() -> Self {
-        RowState {
-            is_compute_row: false,
-            live_value: None,
-            constant: None,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -590,6 +594,25 @@ mod tests {
     //     ComputedNetworkWithBackwardEdges::new(&ntk)
     // });
 
+    // ERROR: This also does not work bc of the weird implementation of a network
+    // fn simple_egraph() -> ComputedNetworkWithBackwardEdges<'static, (Extractor<'static, CompilingCostFunction, AigLanguage, ()>, Vec<egg::Id>)> {
+    //     let mut egraph: EGraph<AigLanguage, ()> = Default::default();
+    //     let my_expression: RecExpr<AigLanguage> = "(and (and 1 3) (and 2 3))".parse().unwrap();
+    //     egraph.add_expr(&my_expression);
+    //     let extractor = Extractor::new( &egraph, CompilingCostFunction {});
+    //     let ntk = &(extractor, vec!(egg::Id::from(5)));
+    //     ntk.dump();
+    //     // Id(5): And([Signal(false, Id(2)), Signal(false, Id(4))])
+    //     // Id(4): And([Signal(false, Id(3)), Signal(false, Id(1))])
+    //     // Id(1): Input(3)
+    //     // Id(3): Input(2)
+    //     // Id(2): And([Signal(false, Id(0)), Signal(false, Id(1))])
+    //     // Id(0): Input(1)
+    //
+    //     let ntk_backward = ComputedNetworkWithBackwardEdges::new(ntk);
+    //     ntk_backward
+    // }
+
     static INIT: Once = Once::new();
 
     fn init() -> Compiler {
@@ -599,7 +622,7 @@ mod tests {
         Compiler::new(CompilerSettings { print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, repetition_fracops: 5, safe_space_rows_per_subarray: 16 } )
     }
 
-    #[test] // mark function as test-fn
+    #[test]
     fn test_alloc_safe_space_rows() {
         let mut compiler = init();
         const REQUESTED_SAFE_SPACE_ROWS: u8 = 8;
@@ -609,7 +632,7 @@ mod tests {
         assert_eq!(compiler.safe_space_rows.iter().dedup().collect::<Vec<&RowAddress>>().len(), REQUESTED_SAFE_SPACE_ROWS as usize);
     }
 
-    #[test] // mark function as test-fn
+    #[test]
     fn test_candidate_initialization() {
         let mut compiler = init();
 
@@ -629,16 +652,22 @@ mod tests {
         // Id(0): Input(1)
 
         // act is if one `AND` has already been computed -> other and (`Id(2)`) should be the only candidate left
-        compiler .comp_state.value_states.insert(Signal::new(eggmock::Id::from(4), false), ValueState{ is_computed: true, row_location: None });
+        compiler.comp_state.value_states.insert(Signal::new(eggmock::Id::from(4), false), ValueState{ is_computed: true, row_location: None });
 
         let ntk_backward = ComputedNetworkWithBackwardEdges::new(ntk);
 
-        compiler.initialize_candidates(&ntk_backward);
+        compiler.init_candidates(&ntk_backward);
         let is_candidate_ids: HashSet<Signal> = compiler.comp_state.candidates.iter().map(|(id,_)| *id).collect();
         let should_candidate_ids: HashSet<Signal> = HashSet::from([Signal::new( eggmock::Id::from(2), false), Signal::new(eggmock::Id::from(4), false)]);
         assert_eq!( is_candidate_ids, should_candidate_ids);
 
         // TODO: test-case with node that relies on one input src-operand and one non-input (intermediate node) src-operand
+    }
+
+    #[test]
+    fn test_new_candidates() {
+        let mut compiler = init();
+
     }
 
     #[test]

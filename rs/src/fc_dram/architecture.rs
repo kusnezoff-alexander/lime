@@ -340,6 +340,7 @@ impl Instruction {
     pub fn get_nr_memcycles(&self) -> u16 {
         match self {
             Instruction::FracOp(__) => 7,     // see [2] ChapIII.A, (two cmd-cycles + five idle cycles)
+            // TODO: change to ns (t_{RAS}+6ns) - `t_{RAS}` to mem cycles
             Instruction::APA(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
             Instruction::RowCloneFPM(_, _) => 2,    // see [4] Chap3.2
             Instruction::RowClonePSM(_, _) => 256,  // =(8192B/64B)*2 (*2 since copies two time, to and from `<other_bank>` on 64B-granularity
