@@ -34,7 +34,7 @@ use self::egraph_extraction::CompilingCostFunction;
 
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
 use eggmock::{
-    Aig, AigLanguage, AigReceiverFFI, Network, NetworkWithBackwardEdges, Receiver, ReceiverFFI, Rewriter, RewriterFFI, Signal // TODO: add AOIG-rewrite (bc FC-DRAM supports AND&OR natively)?
+    Aig, AigReceiverFFI, Aoig, AoigLanguage, AoigReceiverFFI, Network, NetworkWithBackwardEdges, Receiver, ReceiverFFI, Rewriter, RewriterFFI, Signal // TODO: add AOIG-rewrite (bc FC-DRAM supports AND&OR natively)?
 };
 use log::{debug, logger};
 use program::*;
@@ -42,7 +42,7 @@ use architecture::*;
 
 /// Rewrite rules to use in E-Graph Rewriting (see [egg](https://egraphs-good.github.io/))
 /// TODO: adjust rewriting rules to FCDRAM (=AND/OR related rewrites like De-Morgan?)
-static REWRITE_RULES: LazyLock<Vec<Rewrite<AigLanguage, ()>>> = LazyLock::new(|| {
+static REWRITE_RULES: LazyLock<Vec<Rewrite<AoigLanguage, ()>>> = LazyLock::new(|| {
     let mut rules = vec![
         // TODO: add "or" - and De-Morgan ?
         rewrite!("commute-and"; "(and ?a ?b)" => "(and ?b ?a)"),
@@ -68,13 +68,13 @@ static REWRITE_RULES: LazyLock<Vec<Rewrite<AigLanguage, ()>>> = LazyLock::new(||
 #[ouroboros::self_referencing]
 struct CompilerOutput {
     /// Result E-Graph
-    graph: EGraph<AigLanguage, ()>,
+    graph: EGraph<AoigLanguage, ()>,
     /// (, output-nodes)
     #[borrows(graph)]
     #[covariant]
     /// A network consists of nodes (accessed via `Extractor` and separately stored `outputs` (`Vec<Id>`)
     ntk: (
-        Extractor<'this, CompilingCostFunction, AigLanguage, ()>, // `'this`=self-reference, used to extract best-node from `E-Class` of `AigLanguage`-nodes based on `CompilingCostFunction`
+        Extractor<'this, CompilingCostFunction, AoigLanguage, ()>, // `'this`=self-reference, used to extract best-node from `E-Class` of `AoigLanguage`-nodes based on `CompilingCostFunction`
         Vec<Id>, // vector of outputs
     ),
     /// Compiled Program Program is compiled using previously (EGraph-)extracted `ntk`
@@ -86,19 +86,19 @@ struct CompilerOutput {
 /// - returned receiver allows converting result-graph in both directions (C++ <=> Rust)
 /// - `settings`: compiler-options
 fn compiling_receiver<'a>(
-    rules: &'a [Rewrite<AigLanguage, ()>],
+    rules: &'a [Rewrite<AoigLanguage, ()>],
     settings: CompilerSettings,
-) -> impl Receiver<Result = CompilerOutput, Node = Aig> + use<'a> {
+) -> impl Receiver<Result = CompilerOutput, Node = Aoig> + use<'a> {
     // REMINDER: EGraph implements `Receiver`
     // TODO: deactivate e-graph rewriting, focus on compilation first
     let mut compiler = Compiler::new(settings); // TODO: rewrite this to a singleton-class
-    EGraph::<AigLanguage, _>::new(())
+    EGraph::<AoigLanguage, _>::new(())
         .map(move |(graph, outputs)| { // `.map()` of `Provider`-trait!, outputs=vector of EClasses
 
             debug!("Input EGraph nodes: {:?}", graph.nodes());
             debug!("Input EGraph's EClasses : {:?}", graph.classes()
                 .map(|eclass| (eclass.id, &eclass.nodes) )
-                .collect::<Vec<(Id,&Vec<AigLanguage>)>>()
+                .collect::<Vec<(Id,&Vec<AoigLanguage>)>>()
             );
             // 1. Create E-Graph: run equivalence saturation
             // debug("Running equivalence saturation...");
@@ -191,29 +191,31 @@ pub struct CompilerSettings {
 struct FCDramRewriter(CompilerSettings);
 
 impl Rewriter for FCDramRewriter {
-    type Node = Aig;
+    type Node = Aoig;
     type Intermediate = CompilerOutput;
 
     fn create_receiver(
         &mut self,
-    ) -> impl Receiver<Node = Aig, Result = CompilerOutput> + 'static {
-        compiling_receiver(REWRITE_RULES.as_slice(), self.0)
+    ) -> impl Receiver<Node = Aoig, Result = CompilerOutput> + 'static {
+        compiling_receiver(REWRITE_RULES.as_slice(), self.0).adapt(Into::into)
     }
 
     fn rewrite(
         self,
         result: CompilerOutput,
-        output: impl Receiver<Node = Aig, Result = ()>,
+        output: impl Receiver<Node = Aoig, Result = ()>,
     ) {
+        // todo!()
         result.borrow_ntk().send(output);
     }
 }
 
-/// ?? (maybe FFI for rewriting graph using mockturtle?)
-#[no_mangle]
-extern "C" fn fcdram_rewriter(settings: CompilerSettings) -> AigReceiverFFI<RewriterFFI<Aig>> {
-    RewriterFFI::new(FCDramRewriter(settings))
-}
+// TODO: this will be needed once E-Graph Validation is added (=once we want to transfer the E-Graph back to mockturtle)
+// /// ?? (maybe FFI for rewriting graph using mockturtle?)
+// #[no_mangle]
+// extern "C" fn fcdram_rewriter(settings: CompilerSettings) -> AigReceiverFFI<RewriterFFI<Aig>> {
+//     RewriterFFI::new(FCDramRewriter(settings))
+// }
 
 /// Statistic results about Compilation-Process
 #[repr(C)]
@@ -243,5 +245,5 @@ extern "C" fn fcdram_compile(settings: CompilerSettings) -> AigReceiverFFI<Compi
                     instruction_count: output.borrow_program().instructions.len() as u64,
             }
         });
-    AigReceiverFFI::new(receiver)
+    AigReceiverFFI::new(receiver.adapt(Into::into))
 }

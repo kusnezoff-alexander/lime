@@ -9,7 +9,7 @@
 use super::{
     architecture::{subarrayid_to_subarray_address, Instruction, LogicOp, SubarrayId, ARCHITECTURE, NR_SUBARRAYS, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
 };
-use eggmock::{Aig, Id, NetworkWithBackwardEdges, Node, Signal};
+use eggmock::{Aoig, Id, NetworkWithBackwardEdges, Node, Signal};
 use itertools::Itertools;
 use log::debug;
 use priority_queue::PriorityQueue;
@@ -52,7 +52,7 @@ impl Compiler {
     ///     - 2) outputs can be found after the program has run
     pub fn compile(
         &mut self,
-        network: &impl NetworkWithBackwardEdges<Node = Aig>,
+        network: &impl NetworkWithBackwardEdges<Node = Aoig>,
     ) -> Program {
         let mut program = Program::new(vec!());
 
@@ -159,7 +159,7 @@ impl Compiler {
     }
 
     /// Initialize candidates with all nodes that are computable
-    fn init_candidates(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aig>) {
+    fn init_candidates(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>) {
         let inputs: Vec<Id> = network.leaves().collect();
 
         // init candidates with all nodes having only inputs as src-operands
@@ -178,7 +178,7 @@ impl Compiler {
     }
 
     /// Returns list of candidates that can be computed once `computed_node` is available
-    fn get_new_candidates(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aig>, computed_node: Signal) -> PriorityQueue<Signal, SchedulingPrio> {
+    fn get_new_candidates(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>, computed_node: Signal) -> PriorityQueue<Signal, SchedulingPrio> {
         debug!("Candidates: {:?}", self.comp_state.candidates);
         debug!("DRAM state: {:?}", self.comp_state.value_states);
         network.node_outputs(computed_node.node_id())
@@ -194,7 +194,7 @@ impl Compiler {
     }
 
     /// Initialize compilation state: mark unsuable rows (eg safe-space rows), place input operands
-    fn init_comp_state(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aig>, program: &mut Program) {
+    fn init_comp_state(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>, program: &mut Program) {
         // debug!("Compiling {:?}", network);
         // 0.1 Allocate safe-space rows (for storing intermediate values safely
         self.alloc_safe_space_rows(self.settings.safe_space_rows_per_subarray);
@@ -290,7 +290,7 @@ impl Compiler {
     /// NOTE: Some inputs may be needed in a negated form by the candidates. To start execution those
     /// input operands have to be available with their negated form.
     /// TODO: NEXT
-    fn init_negated_src_operands(&mut self, src_operands: Vec<Signal>, network: &impl NetworkWithBackwardEdges<Node = Aig>) -> Vec<Instruction> {
+    fn init_negated_src_operands(&mut self, src_operands: Vec<Signal>, network: &impl NetworkWithBackwardEdges<Node = Aoig>) -> Vec<Instruction> {
         let mut instructions = vec!();
         let mut negated_inputs: HashSet<Signal> = HashSet::new(); // inputs which are required in their negated form
         let negated_src_operands: Vec<Signal> = src_operands.iter()
@@ -381,8 +381,9 @@ impl Compiler {
         panic!("OOM: No more available safe-space rows");
     }
 
+    /// Returns Instructions to execute given `next_candidate`
     /// - [ ] make sure that operation to be executed on those rows won't simultaneously activate other rows holding valid data which will be used by future operations
-    fn execute_next_instruction(&mut self, next_candidate: &Signal, network: &impl NetworkWithBackwardEdges<Node = Aig>) -> Vec<Instruction> {
+    fn execute_next_instruction(&mut self, next_candidate: &Signal, network: &impl NetworkWithBackwardEdges<Node = Aoig>) -> Vec<Instruction> {
         let mut next_instructions = vec!();
 
         debug!("Executing candidate {:?}", next_candidate);
@@ -408,8 +409,8 @@ impl Compiler {
         let language_op = network.node(next_candidate.node_id());
 
         let logic_op = match language_op {
-            Aig::And(_) => LogicOp::AND,
-            Aig::Or(_) => LogicOp::OR,
+            Aoig::And(_) => LogicOp::AND,
+            Aoig::Or(_) => LogicOp::OR,
             // TODO: extract NOT
             _ => panic!("candidate is expected to be a logic op"),
         };
@@ -463,7 +464,7 @@ impl Compiler {
     /// Compute `SchedulingPrio` for a given node
     /// - used for inserting new candidates
     /// TODO: write unittest for this function
-    fn compute_scheduling_prio_for_node(&self, signal: Signal, network: &impl NetworkWithBackwardEdges<Node = Aig>) -> SchedulingPrio {
+    fn compute_scheduling_prio_for_node(&self, signal: Signal, network: &impl NetworkWithBackwardEdges<Node = Aoig>) -> SchedulingPrio {
         let nr_last_value_uses = network.node(signal.node_id()).inputs() // for each input check whether `id` is the last node using it
             .iter()
             .fold(0, |acc, input| {
@@ -576,7 +577,7 @@ impl PartialOrd for SchedulingPrio {
 #[cfg(test)]
 mod tests {
     use eggmock::egg::{self, EGraph, Extractor, RecExpr};
-    use eggmock::{AigLanguage, ComputedNetworkWithBackwardEdges, Network};
+    use eggmock::{AoigLanguage, ComputedNetworkWithBackwardEdges, Network};
 
     use crate::fc_dram::egraph_extraction::CompilingCostFunction;
 
@@ -586,8 +587,8 @@ mod tests {
     // ERROR: `eggmock`-API doesn't allow this..
     // // For data shared among unittests but initalized only once
     // static TEST_DATA: LazyLock<_> = LazyLock::new(|| {
-    //     let mut egraph: EGraph<AigLanguage, ()> = Default::default();
-    //     let my_expression: RecExpr<AigLanguage> = "(and (and a c) (and b c))".parse().unwrap();
+    //     let mut egraph: EGraph<AoigLanguage, ()> = Default::default();
+    //     let my_expression: RecExpr<AoigLanguage> = "(and (and a c) (and b c))".parse().unwrap();
     //     let extractor = Extractor::new( &egraph, CompilingCostFunction {});
     //     let ntk = (extractor, vec!(egg::Id::from(9)));
     //
@@ -595,9 +596,9 @@ mod tests {
     // });
 
     // ERROR: This also does not work bc of the weird implementation of a network
-    // fn simple_egraph() -> ComputedNetworkWithBackwardEdges<'static, (Extractor<'static, CompilingCostFunction, AigLanguage, ()>, Vec<egg::Id>)> {
-    //     let mut egraph: EGraph<AigLanguage, ()> = Default::default();
-    //     let my_expression: RecExpr<AigLanguage> = "(and (and 1 3) (and 2 3))".parse().unwrap();
+    // fn simple_egraph() -> ComputedNetworkWithBackwardEdges<'static, (Extractor<'static, CompilingCostFunction, AoigLanguage, ()>, Vec<egg::Id>)> {
+    //     let mut egraph: EGraph<AoigLanguage, ()> = Default::default();
+    //     let my_expression: RecExpr<AoigLanguage> = "(and (and 1 3) (and 2 3))".parse().unwrap();
     //     egraph.add_expr(&my_expression);
     //     let extractor = Extractor::new( &egraph, CompilingCostFunction {});
     //     let ntk = &(extractor, vec!(egg::Id::from(5)));
@@ -636,10 +637,10 @@ mod tests {
     fn test_candidate_initialization() {
         let mut compiler = init();
 
-        let mut egraph: EGraph<AigLanguage, ()> = Default::default();
-        let my_expression: RecExpr<AigLanguage> = "(and (and 1 3) (and 2 3))".parse().unwrap();
+        let mut egraph: EGraph<AoigLanguage, ()> = Default::default();
+        let my_expression: RecExpr<AoigLanguage> = "(and (and 1 3) (and 2 3))".parse().unwrap();
         egraph.add_expr(&my_expression);
-        let output2 = egraph.add(AigLanguage::And([eggmock::egg::Id::from(0), eggmock::egg::Id::from(2)])); // additional `And` with one src-operand=input and one non-input src operand
+        let output2 = egraph.add(AoigLanguage::And([eggmock::egg::Id::from(0), eggmock::egg::Id::from(2)])); // additional `And` with one src-operand=input and one non-input src operand
         debug!("EGraph used for candidate-init: {:?}", egraph);
         let extractor = Extractor::new( &egraph, CompilingCostFunction {});
         let ntk = &(extractor, vec!(egg::Id::from(5), output2));
@@ -674,8 +675,8 @@ mod tests {
     fn test_compute_scheduling_prio_for_node() {
         let mut compiler = init();
 
-        let mut egraph: EGraph<AigLanguage, ()> = Default::default();
-        let my_expression: RecExpr<AigLanguage> = "(and (and 1 3) (and 2 3))".parse().unwrap();
+        let mut egraph: EGraph<AoigLanguage, ()> = Default::default();
+        let my_expression: RecExpr<AoigLanguage> = "(and (and 1 3) (and 2 3))".parse().unwrap();
         egraph.add_expr(&my_expression);
         let extractor = Extractor::new( &egraph, CompilingCostFunction {});
         let ntk = &(extractor, vec!(egg::Id::from(5)));
