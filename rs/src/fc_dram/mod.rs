@@ -34,25 +34,25 @@ use self::egraph_extraction::CompilingCostFunction;
 
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
 use eggmock::{
-    Aig, AigReceiverFFI, Aoig, AoigLanguage, AoigReceiverFFI, Network, NetworkWithBackwardEdges, Receiver, ReceiverFFI, Rewriter, RewriterFFI, Signal // TODO: add AOIG-rewrite (bc FC-DRAM supports AND&OR natively)?
+    AigReceiverFFI, Aoig, AoigLanguage, Network, NetworkWithBackwardEdges, Receiver, ReceiverFFI, Signal
 };
-use log::{debug, logger};
+use log::debug;
 use program::*;
 use architecture::*;
 
 /// Rewrite rules to use in E-Graph Rewriting (see [egg](https://egraphs-good.github.io/))
 /// TODO: adjust rewriting rules to FCDRAM (=AND/OR related rewrites like De-Morgan?)
 static REWRITE_RULES: LazyLock<Vec<Rewrite<AoigLanguage, ()>>> = LazyLock::new(|| {
-    let mut rules = vec![
+    let rules = vec![
         // TODO: add "or" - and De-Morgan ?
         rewrite!("commute-and"; "(and ?a ?b)" => "(and ?b ?a)"),
         rewrite!("and-1"; "(and ?a 1)" => "?a"),
         rewrite!("and-0"; "(and ?a 0)" => "0"),
         // TODO: first add `AOIG`-language and add conversion AOIG<->AIG (so mockturtle's aig can still be used underneath)
-        // rewrite!("and-or"; "(! (or (! ?a) (! ?b)))" => "(and ?a ?b)"), // (De-Morgan) ! not checked whether this works
-        // rewrite!("or-and"; "(! (and (! ?a) (! ?b)))" => "(or ?a ?b)" ), // (De-Morgan) ! not checked whether this works
-        // rewrite!("and-or"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
-        // rewrite!("or-and"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
+        rewrite!("and-or"; "(! (or (! ?a) (! ?b)))" => "(and ?a ?b)"), // (De-Morgan) ! not checked whether this works
+        rewrite!("or-and"; "(! (and (! ?a) (! ?b)))" => "(or ?a ?b)" ), // (De-Morgan) ! not checked whether this works
+        rewrite!("and-or"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
+        rewrite!("or-and"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
         rewrite!("and-same"; "(and ?a ?a)" => "?a"),
         rewrite!("not_not"; "(! (! ?a))" => "?a"),
         // rewrite!("maj_1"; "(maj ?a ?a ?b)" => "?a"),
@@ -90,8 +90,7 @@ fn compiling_receiver<'a>(
     settings: CompilerSettings,
 ) -> impl Receiver<Result = CompilerOutput, Node = Aoig> + use<'a> {
     // REMINDER: EGraph implements `Receiver`
-    // TODO: deactivate e-graph rewriting, focus on compilation first
-    let mut compiler = Compiler::new(settings); // TODO: rewrite this to a singleton-class
+    let mut compiler = Compiler::new(settings);
     EGraph::<AoigLanguage, _>::new(())
         .map(move |(graph, outputs)| { // `.map()` of `Provider`-trait!, outputs=vector of EClasses
 
@@ -101,17 +100,17 @@ fn compiling_receiver<'a>(
                 .collect::<Vec<(Id,&Vec<AoigLanguage>)>>()
             );
             // 1. Create E-Graph: run equivalence saturation
-            // debug("Running equivalence saturation...");
-            // let runner = measure_time!(Runner::default().with_egraph(graph).run(rules),  "t_runner", settings.print_compilation_stats );
-            //
-            //
-            // if settings.verbose {
-            //     println!("== Runner Report");
-            //     runner.print_report();
-            // }
-            //
-            // let graph = runner.egraph;
+            debug!("Running equivalence saturation...");
+            let runner = measure_time!(
+                Runner::default().with_egraph(graph).run(rules),  "t_runner", settings.print_compilation_stats
+            );
 
+            if settings.verbose {
+                println!("== Runner Report");
+                runner.print_report();
+            }
+
+            let graph = runner.egraph;
 
             CompilerOutput::new(
                 graph,
@@ -135,6 +134,7 @@ fn compiling_receiver<'a>(
                     debug!("Compiling...");
                     debug!("Network outputs: {:?}", ntk.outputs().collect::<Vec<Signal>>());
                     let ntk_with_backward_edges = ntk.with_backward_edges();
+                    ntk.dump();
                     debug!("Network Leaves: {:?}", ntk_with_backward_edges.leaves().collect::<Vec<eggmock::Id>>());
                     debug!("Network Outputs of first leaf: {:?}",
                         ntk_with_backward_edges.node_outputs(
@@ -188,28 +188,6 @@ pub struct CompilerSettings {
     safe_space_rows_per_subarray: u8,
 }
 
-struct FCDramRewriter(CompilerSettings);
-
-impl Rewriter for FCDramRewriter {
-    type Node = Aoig;
-    type Intermediate = CompilerOutput;
-
-    fn create_receiver(
-        &mut self,
-    ) -> impl Receiver<Node = Aoig, Result = CompilerOutput> + 'static {
-        compiling_receiver(REWRITE_RULES.as_slice(), self.0).adapt(Into::into)
-    }
-
-    fn rewrite(
-        self,
-        result: CompilerOutput,
-        output: impl Receiver<Node = Aoig, Result = ()>,
-    ) {
-        // todo!()
-        result.borrow_ntk().send(output);
-    }
-}
-
 // TODO: this will be needed once E-Graph Validation is added (=once we want to transfer the E-Graph back to mockturtle)
 // /// ?? (maybe FFI for rewriting graph using mockturtle?)
 // #[no_mangle]
@@ -227,13 +205,11 @@ struct CompilerStatistics {
     instruction_count: u64,
 }
 
-/// Main function called from `.cpp()` file - receives compiler settings
+/// Entry point for cpp-code
 /// - `settings`: settings to use when running compiler
 #[no_mangle]
 extern "C" fn fcdram_compile(settings: CompilerSettings) -> AigReceiverFFI<CompilerStatistics> {
-    // todo!()
-    // TODO: create example `ARCHITECTURE` implementing `FCDRAMArchitecture`
-    env_logger::init();
+    env_logger::init(); // needed for `export RUST_LOG=debug` to work
     let receiver =
         compiling_receiver(REWRITE_RULES.as_slice(), settings)
             .map(|output| {
@@ -245,5 +221,6 @@ extern "C" fn fcdram_compile(settings: CompilerSettings) -> AigReceiverFFI<Compi
                     instruction_count: output.borrow_program().instructions.len() as u64,
             }
         });
+    // return graph back to calling cpp-code
     AigReceiverFFI::new(receiver.adapt(Into::into))
 }
