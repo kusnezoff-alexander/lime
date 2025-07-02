@@ -212,7 +212,7 @@ impl FCDRAMArchitecture {
     ///
     /// NOTE: `compute_rows` are expected to lay in the same subarray and `reference_rows` in one
     /// subarray adjacent to the compute subarray (!this is not checked but assumed to be true!)
-    fn get_instructions_implementation_of_logic_ops(logic_op: LogicOp) -> Vec<Instruction> {
+    pub fn get_instructions_implementation_of_logic_ops(logic_op: LogicOp) -> Vec<Instruction> {
         match logic_op {
             LogicOp::NOT => vec!(Instruction::APA(0, 0)),
             LogicOp::AND => vec!(Instruction::FracOp(0), Instruction::APA(0, 0)),

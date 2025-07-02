@@ -1,12 +1,11 @@
 //! Functionality for generating actual program using architecture defined in [`architecture`] by
 //! compiling given logic-network (see [`compilation`]) and potentially adding some manual
 //! optimizations ([`optimization`])
-use super::architecture::{FCDRAMArchitecture, RowAddress};
+use super::architecture::RowAddress;
 use crate::fc_dram::architecture::{get_subarrayid_from_rowaddr, Instruction, ROW_ID_BITMASK};
-use eggmock::{Id, Aig, NetworkWithBackwardEdges, Signal};
+use eggmock::Signal;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::ops::{Deref, DerefMut};
 
 
 #[derive(Debug, Clone)]

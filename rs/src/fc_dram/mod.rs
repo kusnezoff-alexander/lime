@@ -51,8 +51,8 @@ static REWRITE_RULES: LazyLock<Vec<Rewrite<AoigLanguage, ()>>> = LazyLock::new(|
         // TODO: first add `AOIG`-language and add conversion AOIG<->AIG (so mockturtle's aig can still be used underneath)
         rewrite!("and-or"; "(! (or (! ?a) (! ?b)))" => "(and ?a ?b)"), // (De-Morgan) ! not checked whether this works
         rewrite!("or-and"; "(! (and (! ?a) (! ?b)))" => "(or ?a ?b)" ), // (De-Morgan) ! not checked whether this works
-        rewrite!("and-or"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
-        rewrite!("or-and"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
+        rewrite!("and-or-more-not"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
+        rewrite!("or-and-more-not"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
         rewrite!("and-same"; "(and ?a ?a)" => "?a"),
         rewrite!("not_not"; "(! (! ?a))" => "?a"),
         // rewrite!("maj_1"; "(maj ?a ?a ?b)" => "?a"),
@@ -133,8 +133,8 @@ fn compiling_receiver<'a>(
 
                     debug!("Compiling...");
                     debug!("Network outputs: {:?}", ntk.outputs().collect::<Vec<Signal>>());
-                    let ntk_with_backward_edges = ntk.with_backward_edges();
                     ntk.dump();
+                    let ntk_with_backward_edges = ntk.with_backward_edges();
                     debug!("Network Leaves: {:?}", ntk_with_backward_edges.leaves().collect::<Vec<eggmock::Id>>());
                     debug!("Network Outputs of first leaf: {:?}",
                         ntk_with_backward_edges.node_outputs(

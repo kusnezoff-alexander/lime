@@ -6,12 +6,11 @@
 //!         - manually adapt safe-space to program requirements: unused safe-space rows could still be used ?!
 //!         - [ ] Rematerialization ?
 use crate::fc_dram::architecture::{RowAddress, Instruction};
-use rustc_hash::FxHashSet;
 
 use super::{architecture::FCDRAMArchitecture, program::Program};
 
 pub fn optimize(program: &mut Program) {
-    if program.instructions.len() == 0 {
+    if program.instructions.is_empty() {
         return;
     }
     let mut opt = Optimization { program };
