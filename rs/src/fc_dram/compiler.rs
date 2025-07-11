@@ -13,7 +13,7 @@ use eggmock::{Aoig, Id, NetworkWithBackwardEdges, Node, Signal};
 use itertools::Itertools;
 use log::debug;
 use priority_queue::PriorityQueue;
-use toml::Table;
+use toml::{Table, Value};
 use std::{cmp::Ordering, collections::{HashMap, HashSet}, ffi::CStr, fmt::Debug, fs, path::Path};
 
 /// Provides [`Compiler::compile()`] to compile a logic network into a [`Program`]
@@ -196,19 +196,37 @@ impl Compiler {
         // 0.1 Allocate safe-space rows (for storing intermediate values and constants 0s&1s) safely
         if config.is_file() {
             // TODO: load configs from file
+            // todo!("Load config from that file..");
+
+            let content = fs::read_to_string(config).unwrap();
+            let value = content.parse::<toml::Table>().unwrap(); // Parse into generic TOML Value :contentReference[oaicite:1]{index=1}
+
+            if let Some(arr) = value.get("safe_space_rows").and_then(|v| v.as_array()) {
+                println!("Found array of length {}", arr.len());
+                    self.safe_space_rows = arr.iter().map(|v| {
+                        v.as_integer().expect("Expected integer") as u64
+                    }).collect();
+            } else {
+                panic!("Config file doesn't contain value for safe-space-rows");
+            }
+
         } else {
             // TODO: compute configs and write them to this file
 
             // debug!("Compiling {:?}", network);
             self.alloc_safe_space_rows(self.settings.safe_space_rows_per_subarray);
 
-            self.place_constants();
+            // self.place_constants();
 
+            let safe_space_rows_toml = Value::Array(self.safe_space_rows.iter().map(
+                |row| Value::Integer(*row as i64)
+            ).collect());
             let config_in_toml = toml::toml! {
-                safe_space_rows = [1,2,3]
+                safe_space_rows = safe_space_rows_toml
             };
             fs::write(config, config_in_toml.to_string()).expect("Sth went wrong here..");
         }
+        self.place_constants(); // TODO: move into config-file too?
 
         // deactivate all combination which could activate safe-space rows
         for row in self.safe_space_rows.iter() {
