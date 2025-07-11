@@ -13,7 +13,8 @@ use eggmock::{Aoig, Id, NetworkWithBackwardEdges, Node, Signal};
 use itertools::Itertools;
 use log::debug;
 use priority_queue::PriorityQueue;
-use std::{cmp::Ordering, collections::{HashMap, HashSet}};
+use toml::Table;
+use std::{cmp::Ordering, collections::{HashMap, HashSet}, ffi::CStr, fmt::Debug, fs, path::Path};
 
 /// Provides [`Compiler::compile()`] to compile a logic network into a [`Program`]
 pub struct Compiler {
@@ -114,13 +115,6 @@ impl Compiler {
                 .iter().map(|row| row & ROW_ID_BITMASK) // reset subarray-id to all 0s
                 .collect()
         };
-
-        // deactivate all combination which could activate safe-space rows
-        for row in self.safe_space_rows.iter() {
-            for row_combi in ARCHITECTURE.row_activated_by_rowaddress_tuple.get(row).unwrap() {
-                self.blocked_row_combinations.insert(*row_combi);
-            }
-        }
     }
 
     /// Places (commonly used) constants in safe-space rows
@@ -195,11 +189,34 @@ impl Compiler {
 
     /// Initialize compilation state: mark unsuable rows (eg safe-space rows), place input operands
     fn init_comp_state(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>, program: &mut Program) {
-        // debug!("Compiling {:?}", network);
-        // 0.1 Allocate safe-space rows (for storing intermediate values safely
-        self.alloc_safe_space_rows(self.settings.safe_space_rows_per_subarray);
+        let config_file = unsafe { CStr::from_ptr(self.settings.config_file) }.to_str().unwrap();
+        let config = Path::new(config_file);
+        println!("{:?}", config);
 
-        self.place_constants();
+        // 0.1 Allocate safe-space rows (for storing intermediate values and constants 0s&1s) safely
+        if config.is_file() {
+            // TODO: load configs from file
+        } else {
+            // TODO: compute configs and write them to this file
+
+            // debug!("Compiling {:?}", network);
+            self.alloc_safe_space_rows(self.settings.safe_space_rows_per_subarray);
+
+            self.place_constants();
+
+            let config_in_toml = toml::toml! {
+                safe_space_rows = [1,2,3]
+            };
+            fs::write(config, config_in_toml.to_string()).expect("Sth went wrong here..");
+        }
+
+        // deactivate all combination which could activate safe-space rows
+        for row in self.safe_space_rows.iter() {
+            for row_combi in ARCHITECTURE.row_activated_by_rowaddress_tuple.get(row).unwrap() {
+                self.blocked_row_combinations.insert(*row_combi);
+            }
+        }
+
         // 0.2 Place all inputs and mark them as being live
         self.place_inputs( network.leaves().collect::<Vec<Id>>() ); // place input-operands into rows
         debug!("Placed inputs {:?} in {:?}", network.leaves().collect::<Vec<Id>>(), self.comp_state.value_states);
@@ -238,7 +255,7 @@ impl Compiler {
                     instructions.push(Instruction::FracOp(frac_row));
                 }
                 for other_row in ref_rows {
-                    instructions.push(Instruction::RowCloneFPM(*row_address_1, other_row));
+                    instructions.push(Instruction::RowCloneFPM(*row_address_1, other_row, String::from("Init ref-subarray with 1s")));
                 }
                 instructions
             },
@@ -250,7 +267,7 @@ impl Compiler {
                     instructions.push(Instruction::FracOp(frac_row));
                 }
                 for other_row in ref_rows {
-                    instructions.push(Instruction::RowCloneFPM(*row_address_0, other_row));
+                    instructions.push(Instruction::RowCloneFPM(*row_address_0, other_row, String::from("Init ref-subarray with 0s")));
                 }
                 instructions
             },
@@ -277,7 +294,7 @@ impl Compiler {
             self.comp_state.dram_state.insert(row_addr, RowState { is_compute_row: true, live_value: Some(src_operand), constant: None });
 
             if (src_operand_location & SUBARRAY_ID_BITMASK) == (row_addr & SUBARRAY_ID_BITMASK) {
-                instructions.push(Instruction::RowCloneFPM(src_operand_location, row_addr));
+                instructions.push(Instruction::RowCloneFPM(src_operand_location, row_addr, String::from("Move operand to compute row")));
             } else {
                 instructions.push(Instruction::RowClonePSM(src_operand_location, row_addr));
             }
@@ -318,9 +335,9 @@ impl Compiler {
                 let (_, ref_array) = self.select_compute_and_ref_subarray(vec!(comp_row));
                 let result_row = (ROW_ID_BITMASK & selected_sra.0) & ref_array;
 
-                let move_to_comp_row = Instruction::RowCloneFPM(origin_unneg_row, comp_row);
-                let not = Instruction::APA(comp_row,  result_row);
-                let move_to_safespace= Instruction::RowCloneFPM(result_row, dst_row);
+                let move_to_comp_row = Instruction::RowCloneFPM(origin_unneg_row, comp_row, String::from("Move row to safe space"));
+                let not = Instruction::ApaNOT(comp_row,  result_row);
+                let move_to_safespace= Instruction::RowCloneFPM(result_row, dst_row, String::from("Move row to safe space"));
 
                 instructions.push(move_to_comp_row);
                 instructions.push(not);
@@ -383,6 +400,7 @@ impl Compiler {
 
     /// Returns Instructions to execute given `next_candidate`
     /// - [ ] make sure that operation to be executed on those rows won't simultaneously activate other rows holding valid data which will be used by future operations
+    /// TODO: NEXT
     fn execute_next_instruction(&mut self, next_candidate: &Signal, network: &impl NetworkWithBackwardEdges<Node = Aoig>) -> Vec<Instruction> {
         let mut next_instructions = vec!();
 
@@ -408,10 +426,11 @@ impl Compiler {
         let (compute_subarray, ref_subarray) = self.select_compute_and_ref_subarray(src_rows);
         let language_op = network.node(next_candidate.node_id());
 
+        // TODO: extract NOT
         let logic_op = match language_op {
-            Aoig::And(_) => LogicOp::AND,
-            Aoig::Or(_) => LogicOp::OR,
-            // TODO: extract NOT
+            // REMINDER: operand-nr is extracted by looking at nr of children beforehand
+            Aoig::And(_) | Aoig::And4(_) | Aoig::And8(_)| Aoig::And16(_)| Aoig::And32(_) => LogicOp::AND,
+            Aoig::Or(_) | Aoig::Or4(_) | Aoig::Or8(_) | Aoig::Or16(_) | Aoig::Or32(_) => LogicOp::OR,
             _ => panic!("candidate is expected to be a logic op"),
         };
 
@@ -446,7 +465,13 @@ impl Compiler {
         // 2.2.1 if yes: move data to other rows for performing this op
 
         // 3. Issue actual operation
-        next_instructions.push(Instruction::APA(row_combi.0, row_combi.1));
+        let mut actual_op = match logic_op {
+            LogicOp::NOT => vec!(Instruction::ApaNOT(row_combi.0, row_combi.1)),
+            LogicOp::AND | LogicOp::OR => vec!(Instruction::ApaAndOr(row_combi.0, row_combi.1)),
+            LogicOp::NAND | LogicOp::NOR => vec!(Instruction::ApaAndOr(row_combi.0, row_combi.1), Instruction::ApaNOT(row_combi.0, row_combi.1)), // TODO: or the othyer way around (1st NOT)?
+        };
+
+        next_instructions.append(&mut actual_op);
         for (&comp_row, &ref_row) in comp_rows.iter().zip(ref_rows.iter()) {
             self.comp_state.dram_state.insert(comp_row, RowState { is_compute_row: true, live_value: Some(*next_candidate), constant: None });
             self.comp_state.value_states.insert(*next_candidate, ValueState { is_computed: true, row_location: Some(comp_row) });
@@ -581,7 +606,8 @@ mod tests {
 
     use crate::fc_dram::egraph_extraction::CompilingCostFunction;
 
-    use super::*; // import all elements from parent-module
+    use super::*; use std::ffi::CString;
+    // import all elements from parent-module
     use std::sync::Once;
 
     // ERROR: `eggmock`-API doesn't allow this..
@@ -620,7 +646,7 @@ mod tests {
         INIT.call_once(|| {
             env_logger::init();
         });
-        Compiler::new(CompilerSettings { print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, repetition_fracops: 5, safe_space_rows_per_subarray: 16 } )
+        Compiler::new(CompilerSettings { print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, repetition_fracops: 5, safe_space_rows_per_subarray: 16, config_file: CString::new("").expect("CString::new failed").as_ptr(), do_save_config: true} )
     }
 
     #[test]

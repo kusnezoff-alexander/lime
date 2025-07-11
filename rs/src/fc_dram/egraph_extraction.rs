@@ -7,18 +7,18 @@ use std::cmp::Ordering;
 use std::ops;
 use std::rc::Rc;
 
-use super::architecture::{FCDRAMArchitecture, LogicOp};
+use super::architecture::{FCDRAMArchitecture, LogicOp, SuccessRate};
 
 pub struct CompilingCostFunction{}
 
 // impl StackedPartialGraph { } // Do I need this??
 
 /// TODO: add reliability as cost-metric
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq)]
 pub struct CompilingCost {
     // partial: RefCell<Either<StackedPartialGraph, Rc<CollapsedPartialGraph>>>,
     /// Probability that the whole program will run successfully
-    success_rate: f64,
+    success_rate: SuccessRate,
     /// Estimation of program cost (from input logic-ops)
     program_cost: usize,
 }
@@ -28,9 +28,41 @@ impl ops::Add<CompilingCost> for CompilingCost {
     type Output = CompilingCost;
 
     fn add(self, rhs: CompilingCost) -> Self::Output {
+        if self.success_rate.0.abs() > 1.0 || rhs.success_rate.0.abs() > 1.0 { // program_cost > 0 since `usize` is always non-negative
+            panic!("Compilingcost must be monotonically increasing!");
+        }
+
         CompilingCost {
             success_rate: self.success_rate * rhs.success_rate, // monotonically decreasing
             program_cost: self.program_cost + rhs.program_cost, // monotonically increasing
+        }
+    }
+}
+
+impl PartialEq for CompilingCost {
+    fn eq(&self, other: &Self) -> bool {
+        self.success_rate == other.success_rate && self.program_cost == other.program_cost
+    }
+}
+
+/// First compare based on success-rate, then on program-cost
+/// TODO: more fine-grained comparison !!
+impl PartialOrd for CompilingCost {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// First compare based on success-rate, then on program-cost
+/// - [`Ordering::Greater`] = better
+/// TODO: more fine-grained comparison !!
+impl Ord for CompilingCost {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // better success-rate is always better than higher program-cost (TODO: improve this)
+        if self.success_rate == other.success_rate { // TOOD: cmp based on some margin (eg +-0.2%)
+            self.program_cost.cmp(&other.program_cost) // lower is better
+        } else {
+            self.success_rate.cmp(&other.success_rate).reverse() // higher is better
         }
     }
 }
@@ -61,17 +93,18 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
         let op_cost = match *enode {
             AoigLanguage::False | AoigLanguage::Input(_) => {
                 CompilingCost {
-                    success_rate: 1.0,
-                    program_cost: 0,
+                    success_rate: SuccessRate(1.0),
+                    program_cost: 1, // !=0 to ensure Cost-Function is *strictly monotonically increasing*
                 }
             },
             AoigLanguage::And([node1, node2]) => {
 
                 let mem_cycles_and  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::AND)
                     .iter().fold(0, |acc, instr| { acc + instr.get_nr_memcycles() as usize });
-                let expected_success_rate = 0.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
+                debug!("Cycles AND: {}",  mem_cycles_and);
+                let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
                 CompilingCost {
-                    success_rate: expected_success_rate,
+                    success_rate: SuccessRate(expected_success_rate),
                     program_cost: mem_cycles_and,
                 }
 
@@ -79,28 +112,30 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
             AoigLanguage::Or([node1, node2]) => {
                 let mem_cycles_or  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::OR)
                     .iter().fold(0, |acc, instr| { acc + instr.get_nr_memcycles() as usize });
-                let expected_success_rate = 0.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
+                debug!("Cycles OR: {}",  mem_cycles_or);
+                let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
                 CompilingCost {
-                    success_rate: expected_success_rate,
+                    success_rate: SuccessRate(expected_success_rate),
                     program_cost: mem_cycles_or,
                 }
             },
             // TODO: increase cost of NOT? (since it moves the value to another subarray!)
             // eg prefer `OR(a,b)` to `NOT(AND( NOT(a), NOT(b)))`
             AoigLanguage::Not(node) => {
-                let mem_cycles_and  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::NOT)
+                let mem_cycles_not  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::NOT)
                     .iter().fold(0, |acc, instr| { acc + instr.get_nr_memcycles() as usize });
-                let expected_success_rate = 0.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
+                debug!("Cycles NOT: {}",  mem_cycles_not);
+                let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
 
                 CompilingCost {
-                    success_rate: expected_success_rate,
-                    program_cost: mem_cycles_and,
+                    success_rate: SuccessRate(expected_success_rate),
+                    program_cost: mem_cycles_not,
                 }
             },
             _ => {
                 // todo!();
                 CompilingCost {
-                    success_rate: 0.0,
+                    success_rate: SuccessRate(1.0),
                     program_cost: 7,
                 }
                 // 0 // TODO: implement for nary-ops, eg using `.children()`
@@ -117,29 +152,10 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
     }
 }
 
-impl PartialEq for CompilingCost {
-    fn eq(&self, other: &Self) -> bool {
-        self.success_rate == other.success_rate && self.program_cost == other.program_cost
-    }
-}
-
-/// First compare based on success-rate, then on program-cost
-/// TODO: more fine-grained comparison !!
-impl PartialOrd for CompilingCost {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self.success_rate == other.success_rate {
-            self.program_cost.partial_cmp(&other.program_cost)
-        } else {
-            self.success_rate.partial_cmp(&other.success_rate)
-        }
-    }
-}
-
-
 #[cfg(test)]
 mod tests {
     use eggmock::egg::{self, rewrite, EGraph, Extractor, RecExpr, Rewrite, Runner};
-    use eggmock::{AoigLanguage, ComputedNetworkWithBackwardEdges, Network, Signal};
+    use eggmock::{AoigLanguage, ComputedNetworkWithBackwardEdges, Network};
 
     use crate::fc_dram::compiler::Compiler;
     use crate::fc_dram::egraph_extraction::CompilingCostFunction;

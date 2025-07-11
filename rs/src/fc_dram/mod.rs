@@ -24,6 +24,7 @@ pub mod optimization;
 pub mod program;
 pub mod utils;
 
+use std::ffi::{CStr, OsStr};
 use std::sync::LazyLock;
 use std::time::Instant;
 
@@ -90,7 +91,7 @@ fn compiling_receiver<'a>(
     settings: CompilerSettings,
 ) -> impl Receiver<Result = CompilerOutput, Node = Aoig> + use<'a> {
     // REMINDER: EGraph implements `Receiver`
-    let mut compiler = Compiler::new(settings);
+    let mut compiler = Compiler::new(settings.clone());
     EGraph::<AoigLanguage, _>::new(())
         .map(move |(graph, outputs)| { // `.map()` of `Provider`-trait!, outputs=vector of EClasses
 
@@ -161,7 +162,7 @@ fn compiling_receiver<'a>(
     })
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 /// Compiler options
 /// - TODO: add flags like minimal success-rate for program
@@ -186,6 +187,10 @@ pub struct CompilerSettings {
     /// - Ops reusing those operands have to clone the values from the safe-space prior to issuing the Op
     /// - NOTE: rows which are used as safe-space are determined by analyzing patterns in Simultaneous-row activation for the specific architecture (to ensure that safe-space rows won't be activated on any combination of row-addresses)
     safe_space_rows_per_subarray: u8,
+    /// Location of config-file (to which to write the compiled configs) - if this config file doesn't exist then a new one is generated under this given path
+    config_file: *const i8,
+    /// Whether to save the configuration file (for used safe-space rows, placement of constant 0s&1s, ..)
+    do_save_config: bool,
 }
 
 // TODO: this will be needed once E-Graph Validation is added (=once we want to transfer the E-Graph back to mockturtle)
@@ -209,6 +214,7 @@ struct CompilerStatistics {
 /// - `settings`: settings to use when running compiler
 #[no_mangle]
 extern "C" fn fcdram_compile(settings: CompilerSettings) -> AigReceiverFFI<CompilerStatistics> {
+
     env_logger::init(); // needed for `export RUST_LOG=debug` to work
     let receiver =
         compiling_receiver(REWRITE_RULES.as_slice(), settings)

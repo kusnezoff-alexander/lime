@@ -5,7 +5,7 @@
 //!
 //! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of RowAddress
 
-use std::{cmp::Ordering, collections::{HashMap, HashSet}, fmt::{Display, Formatter}, sync::LazyLock};
+use std::{cmp::Ordering, collections::{HashMap, HashSet}, fmt::{Display, Formatter}, ops, sync::LazyLock};
 
 pub const NR_SUBARRAYS: u64 = 2u64.pow(7);
 pub const ROWS_PER_SUBARRAY: u64 = 2u64.pow(9);
@@ -146,8 +146,23 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
 /// - ! must be smaller than `rows_per_subarray * nr_subarrays` (this is NOT checked!)
 pub type RowAddress = u64;
 pub type SubarrayId = u64;
-#[derive(Debug, PartialEq)]
-pub struct SuccessRate(f64);
+
+// impl Display for Vec<RowAddress> {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "[")?;
+//         let mut iter = self.iter();
+//         if let Some(first) = iter.next() {
+//             write!(f, "{}", first)?;
+//             for elem in iter {
+//                 write!(f, ",{}", elem)?;
+//             }
+//         }
+//         write!(f, "]")
+//     }
+// }
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct SuccessRate(pub f64);
 
 impl Eq for SuccessRate {}
 
@@ -160,6 +175,31 @@ impl PartialOrd for SuccessRate {
 impl Ord for SuccessRate {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.total_cmp(&other.0)
+    }
+}
+
+impl ops::Mul<SuccessRate> for SuccessRate {
+    type Output = SuccessRate;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        SuccessRate(rhs.0 * self.0)
+    }
+}
+
+/// see Figure6,13 in [1] for timing diagrams
+/// - all numbers are specified in ns
+pub struct TimingSpec {
+    pub t_ras: f64,
+    /// Time btw an `PRE` and `ACT` when performing `APA` for issuing a `NOT`
+    pub time_btw_pre_act_apa_not: f64,
+}
+
+impl Default for TimingSpec {
+    fn default() -> Self {
+        todo!()
+        // TimingSpec {
+        //     t_ras:
+        // }
     }
 }
 
@@ -214,9 +254,9 @@ impl FCDRAMArchitecture {
     /// subarray adjacent to the compute subarray (!this is not checked but assumed to be true!)
     pub fn get_instructions_implementation_of_logic_ops(logic_op: LogicOp) -> Vec<Instruction> {
         match logic_op {
-            LogicOp::NOT => vec!(Instruction::APA(0, 0)),
-            LogicOp::AND => vec!(Instruction::FracOp(0), Instruction::APA(0, 0)),
-            LogicOp::OR => vec!(Instruction::FracOp(0), Instruction::APA(0, 0)),
+            LogicOp::NOT => vec!(Instruction::ApaNOT(0, 0)),
+            LogicOp::AND => vec!(Instruction::FracOp(0), Instruction::ApaNOT(0, 0)),
+            LogicOp::OR => vec!(Instruction::FracOp(0), Instruction::ApaNOT(0, 0)),
             LogicOp::NAND => {
                 // 1. AND, 2. NOT
                 FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::AND)
@@ -247,6 +287,7 @@ pub enum RowDistanceToSenseAmps {
     Far=0,
 }
 
+type Comment = String;
 /// Instructions used in FC-DRAM
 /// - NOT: implemented using `APA`
 /// - AND/OR: implemented by (see [1] Chap6.1.2)
@@ -259,7 +300,7 @@ pub enum RowDistanceToSenseAmps {
 ///
 /// Additionally RowClone-operations are added for moving data around if needed (eg if valid data
 /// would be affected by following Simultaneous-Row-Activations)
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Instruction {
     /// Needed for initializing neutral row in reference subarray (to set `V_{AND}`/`V_{OR}` (see
     /// [1](
@@ -267,14 +308,19 @@ pub enum Instruction {
     /// - `PRE` "interrupt the process of row activation, and prevent the sense amplifier from being enabled"
     FracOp(RowAddress),
     /// Multiple-Row Activation: `ACT R_F -> PRE -> ACT R_L -> PRE` of rows `R_F`,`R_L` for rows within
-    /// different subarrays. As a result `R_L` holds the negated value of `R_F` (see Chap5.1 of
-    /// PaperFunctionally Complete DRAMs
+    /// different subarrays. As a result `R_L` holds the negated value of `R_F` (see Chap5.1 of PaperFunctionally Complete DRAMs
     /// Used to implement NOT directly
-    APA(RowAddress,RowAddress), // TODO: Rename to SimultaneousRowActivation or sth the like ?
+    ApaNOT(RowAddress,RowAddress),
+    /// Multiple-Row Activation: `ACT R_F -> PRE -> ACT R_L -> PRE` of rows `R_F`,`R_L` for rows within
+    /// different subarrays (but with different timings than `ApaNOT`!)
+    /// Used to implement `AND`&`OR` (!make sure to init reference subarray beforehand)
+    ApaAndOr(RowAddress,RowAddress),
     /// Fast-Parallel-Mode RowClone for cloning row-data within same subarray
     /// - corresponds to `AA`, basically copies from src-row -> row-buffer -> dst-row
     /// - first operand=src, 2nd operand=dst where `src` and `dst` MUST reside in the same subarray !
-    RowCloneFPM(RowAddress, RowAddress),
+    ///
+    /// Comment indicates what this FPM was issued for (for simpler debugability)
+    RowCloneFPM(RowAddress, RowAddress, Comment),
     /// Copies data from src (1st operand) to dst (2nd operand) using RowClonePSM, which copies the
     /// data from `this_bank(src_row) -> other_bank(rowX) -> this_bank(dst_row)` (where
     /// `other_bank` might be any other bank). Since this copy uses the internal DRAM-bus it works
@@ -289,8 +335,9 @@ impl Display for Instruction {
         // TODO: change string-representation to display subarray-id
         let description = match self {
             Instruction::FracOp(row) => format!("AP({})", display_row(*row)),
-            Instruction::APA(row1,row2) => format!("APA({},{})", display_row(*row1), display_row(*row2)),
-            Instruction::RowCloneFPM(row1, row2) => format!("AA({},{})", display_row(*row1), display_row(*row2)),
+            Instruction::ApaNOT(row1,row2) => format!("APA_NOT({},{})", display_row(*row1), display_row(*row2)),
+            Instruction::ApaAndOr(row1,row2) => format!("APA_AND_OR({},{}) // activates {:?}", display_row(*row1), display_row(*row2), ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(*row1,*row2))),
+            Instruction::RowCloneFPM(row1, row2, comment) => format!("AA({},{}) // {}", display_row(*row1), display_row(*row2), comment),
             Instruction::RowClonePSM(row1, row2) => format!("
                 TRANSFER(<this_bank>{},<other_bank>(rowX))
                 TANSFER(<other_bank>rowX,<this_bank>{})
@@ -341,8 +388,9 @@ impl Instruction {
         match self {
             Instruction::FracOp(__) => 7,     // see [2] ChapIII.A, (two cmd-cycles + five idle cycles)
             // TODO: change to ns (t_{RAS}+6ns) - `t_{RAS}` to mem cycles
-            Instruction::APA(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
-            Instruction::RowCloneFPM(_, _) => 2,    // see [4] Chap3.2
+            Instruction::ApaNOT(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
+            Instruction::ApaAndOr(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
+            Instruction::RowCloneFPM(_, _, _) => 2,    // see [4] Chap3.2
             Instruction::RowClonePSM(_, _) => 256,  // =(8192B/64B)*2 (*2 since copies two time, to and from `<other_bank>` on 64B-granularity
         }
     }
@@ -425,7 +473,7 @@ impl Instruction {
         };
 
         match self {
-            Instruction::APA( r1, r2) => {
+            Instruction::ApaNOT( r1, r2) => {
                 let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(*r1,*r2)).expect("[ERR] Missing SRA for ({r1},{r2}");
                 let nr_operands = activated_rows.len(); // ASSUMPTION: it seems like "operands" referred to the number of activated rows (see [1]
                 // taken from [1] Chap6.3
