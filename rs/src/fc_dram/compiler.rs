@@ -7,12 +7,13 @@
 //! - [`Compiler::compile()`] = main function - compiles given logic network for the given [`architecture`] into a [`program`] using some [`optimization`]
 
 use super::{
-    architecture::{subarrayid_to_subarray_address, Instruction, LogicOp, SubarrayId, ARCHITECTURE, NR_SUBARRAYS, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
+    architecture::{subarrayid_to_subarray_address, Instruction, LogicOp, SubarrayId, SupportedNrOperands, ARCHITECTURE, NR_SUBARRAYS, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
 };
 use eggmock::{Aoig, Id, NetworkWithBackwardEdges, Node, Signal};
 use itertools::Itertools;
 use log::debug;
 use priority_queue::PriorityQueue;
+use strum::IntoEnumIterator;
 use toml::{Table, Value};
 use std::{cmp::Ordering, collections::{HashMap, HashSet}, ffi::CStr, fmt::Debug, fs, path::Path};
 
@@ -24,9 +25,16 @@ pub struct Compiler {
     comp_state: CompilationState,
     /// These rows are reserved in EVERY subarray for storing intermediate results (ignore higher bits of these RowAddress)
     /// - NOTE: only initialized when compilation starts
+    /// - NOTE2: all safe-space rows are treated equally, since no computation is performed on them (and hence distance to sense-amps doesn't really matter)
+    ///
+    /// DEPRECATED: use `blocked_row_combinations` instead (all other rows are safe-space rows)
     safe_space_rows: Vec<RowAddress>,
     /// RowCombinations which are not allowed to be issued via `APA` since they activate rows within the safe-space
     blocked_row_combinations: HashSet<(RowAddress,RowAddress)>,
+    /// For each nr of operands this field store the rowaddress-combination to issue to activate
+    /// the desired nr of rows (the choice is made best on success-rate and maximizing the nr of rows which potentially can't be used for storage
+    /// since they would activate rows where values could reside in)
+    compute_row_activations: HashMap<SupportedNrOperands, (RowAddress,RowAddress)>
 }
 
 impl Compiler {
@@ -36,6 +44,7 @@ impl Compiler {
            comp_state: CompilationState::new( HashMap::new() ),
            safe_space_rows: vec!(),
            blocked_row_combinations: HashSet::new(),
+           compute_row_activations: HashMap::new(),
         }
     }
 
@@ -94,9 +103,33 @@ impl Compiler {
         program
     }
 
+    /// Rather than making sure rows in which live values reside remain untouched, this approach chooses to select fixed RowAddress combinations for all support numbers of operands
+    /// - this function sets [`Compiler::compute_row_activations`]
+    /// - NOTE: this choice is expected to be applicable to row activations in all subarrays since the SRA work equivalently between subarrays
+    ///     - ASSUMPTION: there are no architectural differences btw subarrays
+    ///
+    /// TODO: NEXT
+    fn choose_compute_rows(&mut self) {
+        for nr_operands in SupportedNrOperands::iter() {
+            let possible_row_combis = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&nr_operands).expect("Given Architecture doesn't support SRA of {nr_operands} operands");
+            possible_row_combis.iter().fold(possible_row_combis[0], |best_row_combi, next_row_combi| {
+                // TODO: compare row-combis based on success-rate and return better one of them
+
+                let success_rate_avg_next_row = 0;
+                let success_rate_avg_best_row = 0;
+                // take avg success-rate over all supported LogicOps (since compute rows are the same irrespective of the issued op)
+                for logic_op in LogicOp::iter() {
+                    // logic_op.get
+                }
+                todo!()
+            });
+        }
+    }
     /// Allocates safe-space rows inside the DRAM-module
     /// - NOTE: nr of safe-space rows must be a power of 2 (x) between 1<=x<=64
     /// - [ ] TODO: improve algo (in terms of space efficiency)
+    ///
+    /// PROBLEM: can't test all possibilities since (for nrr safe-space rows=16) there are  `math.comb(512,16) = 841141456821158064519401490400 = 8,4*10^{29}` of them
     fn alloc_safe_space_rows(&mut self, nr_safe_space_rows: u8) {
 
         let supported_nr_safe_space_rows = vec!(1,2,4,8,16,32,64);
@@ -104,17 +137,19 @@ impl Compiler {
             panic!("Only the following nr of rows are supported to be activated: {:?}, given: {}", supported_nr_safe_space_rows, nr_safe_space_rows);
         }
 
-        // TODO: this is just a quick&dirty implementation. Solving this (probably NP-complete) problem of finding optimal safe-space rows is probably worth solving for every DRAM-module once
+        // TODO: this is just a quick&dirty implementation. Solving this problem of finding optimal safe-space rows is probably worth solving for every DRAM-module once
         self.safe_space_rows = {
 
             // choose any row-addr combi activating exactly `nr_safe_space_rows` and choose all that activated rows to be safe-space rows
             let chosen_row_addr_combi = ARCHITECTURE.sra_degree_to_rowaddress_combinations
-                .get(&nr_safe_space_rows).unwrap()
+                .get(&SupportedNrOperands::try_from(nr_safe_space_rows).unwrap()).unwrap()
                 .first().unwrap(); // just take the first row-combi that activates `nr_safe_space_rows`
             ARCHITECTURE.precomputed_simultaneous_row_activations.get(chosen_row_addr_combi).unwrap()
                 .iter().map(|row| row & ROW_ID_BITMASK) // reset subarray-id to all 0s
                 .collect()
         };
+
+        // TODO: if any other rows are unusable as a consequence (bc activating them would activate another safe-space-row anytime) include those unusable rows into safe-space (else they're competely useless)
     }
 
     /// Places (commonly used) constants in safe-space rows
@@ -124,10 +159,12 @@ impl Compiler {
         // place constants in EVERY subarray
         for subarray in 0..NR_SUBARRAYS {
             let mut safe_space = self.safe_space_rows.iter();
+
             let row_address_0 = subarrayid_to_subarray_address(subarray) | safe_space.next().unwrap();
             self.comp_state.constant_values.insert(0, row_address_0);
             let row_address_1 = subarrayid_to_subarray_address(subarray) | safe_space.next().unwrap();
             self.comp_state.constant_values.insert(1, row_address_1);
+            // does it make sense to store any other constants in safe-space??
 
             self.comp_state.dram_state.insert(row_address_0, RowState { is_compute_row: false, live_value: None, constant: Some(0)} );
             self.comp_state.dram_state.insert(row_address_1, RowState { is_compute_row: false, live_value: None, constant: Some(1)} );
@@ -195,8 +232,6 @@ impl Compiler {
 
         // 0.1 Allocate safe-space rows (for storing intermediate values and constants 0s&1s) safely
         if config.is_file() {
-            // TODO: load configs from file
-            // todo!("Load config from that file..");
 
             let content = fs::read_to_string(config).unwrap();
             let value = content.parse::<toml::Table>().unwrap(); // Parse into generic TOML Value :contentReference[oaicite:1]{index=1}
@@ -211,7 +246,6 @@ impl Compiler {
             }
 
         } else {
-            // TODO: compute configs and write them to this file
 
             // debug!("Compiling {:?}", network);
             self.alloc_safe_space_rows(self.settings.safe_space_rows_per_subarray);
@@ -226,6 +260,8 @@ impl Compiler {
             };
             fs::write(config, config_in_toml.to_string()).expect("Sth went wrong here..");
         }
+        // TODO: allow reading these in from config-file
+        // self.choose_compute_rows(); // choose which rows will serve as compute rows (those are stored in `self.compute_row_activations`
         self.place_constants(); // TODO: move into config-file too?
 
         // deactivate all combination which could activate safe-space rows
@@ -236,6 +272,7 @@ impl Compiler {
         }
 
         // 0.2 Place all inputs and mark them as being live
+        // TODO: add additional pass over graph: think about which inputs are needed in which subarray
         self.place_inputs( network.leaves().collect::<Vec<Id>>() ); // place input-operands into rows
         debug!("Placed inputs {:?} in {:?}", network.leaves().collect::<Vec<Id>>(), self.comp_state.value_states);
         // 0.3 Setup: store all network-nodes yet to be compiled
@@ -346,7 +383,7 @@ impl Compiler {
                 let dst_row = self.get_next_free_safespace_row(None);
 
                 // TODO: negate val and move value in selected safe-space row
-                let selected_sra = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&1).unwrap().iter().find(|row| ! self.safe_space_rows.contains(&row.0)) // just select the first available compute-row
+                let selected_sra = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&SupportedNrOperands::try_from(1).unwrap()).unwrap().iter().find(|row| ! self.safe_space_rows.contains(&row.0)) // just select the first available compute-row
                     .expect("It's assumed that issuing APA(row,row) for same row activates only that row");
                 let origin_subarray_bitmask = origin_unneg_row & SUBARRAY_ID_BITMASK;
                 let comp_row = origin_subarray_bitmask | (ROW_ID_BITMASK & selected_sra.0);
@@ -372,6 +409,8 @@ impl Compiler {
     /// Return id of subarray to use for computation and reference (compute_subarrayid, reference_subarrayid)
     /// - based on location of input rows AND current compilation state
     /// - [ ] POSSIBLE EXTENSION: include lookahead for future ops and their inputs they depend on
+    ///
+    /// TODO: NEXT
     fn select_compute_and_ref_subarray(&self, input_rows: Vec<RowAddress>) -> (SubarrayId, SubarrayId) {
         // naive implementation: just use the subarray that most of the `input_rows` reside in
         // TODO: find better solution
@@ -454,7 +493,7 @@ impl Compiler {
 
         // 0. Select an SRA (=row-address tuple) for the selected subarray based on highest success-rate
         // TODO (possible improvement): input replication by choosing SRA with more activated rows than operands and duplicating operands which are in far-away rows into several rows?)
-        let row_combi = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&(nr_rows as u8)).unwrap()
+        let row_combi = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&SupportedNrOperands::try_from(nr_rows as u8).unwrap()).unwrap()
             // sort by success-rate - using eg `BTreeMap` turned out to impose a too large runtime overhead
             .iter()
             .find(|combi| !self.blocked_row_combinations.contains(combi)) // choose first block RowAddr-combination
@@ -622,7 +661,7 @@ mod tests {
     use eggmock::egg::{self, EGraph, Extractor, RecExpr};
     use eggmock::{AoigLanguage, ComputedNetworkWithBackwardEdges, Network};
 
-    use crate::fc_dram::egraph_extraction::CompilingCostFunction;
+    use crate::fc_dram::cost_estimation::CompilingCostFunction;
 
     use super::*; use std::ffi::CString;
     // import all elements from parent-module

@@ -19,7 +19,7 @@
 //! - [`utils`] - utilities (helper macros/...)
 pub mod architecture;
 pub mod compiler;
-pub mod egraph_extraction;
+pub mod cost_estimation;
 pub mod optimization;
 pub mod program;
 pub mod utils;
@@ -31,7 +31,7 @@ use std::time::Instant;
 use crate::measure_time;
 
 use self::compiler::Compiler;
-use self::egraph_extraction::CompilingCostFunction;
+use self::cost_estimation::CompilingCostFunction;
 
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
 use eggmock::{
@@ -186,6 +186,10 @@ pub struct CompilerSettings {
     /// - REMINDER: after `AND`/`OR`-ops the src-operands are overwritten by the op-result, so to reuse operands they're put into specially designated rows (="safe-space") which won't be overwritten
     /// - Ops reusing those operands have to clone the values from the safe-space prior to issuing the Op
     /// - NOTE: rows which are used as safe-space are determined by analyzing patterns in Simultaneous-row activation for the specific architecture (to ensure that safe-space rows won't be activated on any combination of row-addresses)
+    ///
+    /// TODO: if `config_file` is passed, make sure nr safe-space-rows is equal to nr of rows detailed in config-file
+    ///
+    /// DEPRECATED: current implementation select compute rows instead
     safe_space_rows_per_subarray: u8,
     /// Location of config-file (to which to write the compiled configs) - if this config file doesn't exist then a new one is generated under this given path
     config_file: *const i8,

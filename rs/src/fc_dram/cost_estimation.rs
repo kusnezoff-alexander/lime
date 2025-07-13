@@ -1,4 +1,4 @@
-//! Computation of Compiling Costs
+//! Computation of Cost-Metrics (eg includes success rate)
 
 use eggmock::egg::{CostFunction, Id};
 use eggmock::{AoigLanguage, egg::Language};
@@ -13,41 +13,40 @@ pub struct CompilingCostFunction{}
 
 // impl StackedPartialGraph { } // Do I need this??
 
-/// TODO: add reliability as cost-metric
+/// A metric that estimates the runtime cost of executing an [`super::Instruction`] (in the program)
 #[derive(Debug, Clone, Copy, Eq)]
-pub struct CompilingCost {
-    // partial: RefCell<Either<StackedPartialGraph, Rc<CollapsedPartialGraph>>>,
+pub struct InstructionCost {
     /// Probability that the whole program will run successfully
     success_rate: SuccessRate,
-    /// Estimation of program cost (from input logic-ops)
-    program_cost: usize,
+    /// Nr of memcycles it takes to execute the corresponding instruction
+    mem_cycles: usize,
 }
 
 /// Needed to implement `enode.fold()` for computing overall cost from node together with its children
-impl ops::Add<CompilingCost> for CompilingCost {
-    type Output = CompilingCost;
+impl ops::Add<InstructionCost> for InstructionCost {
+    type Output = InstructionCost;
 
-    fn add(self, rhs: CompilingCost) -> Self::Output {
+    fn add(self, rhs: InstructionCost) -> Self::Output {
         if self.success_rate.0.abs() > 1.0 || rhs.success_rate.0.abs() > 1.0 { // program_cost > 0 since `usize` is always non-negative
             panic!("Compilingcost must be monotonically increasing!");
         }
 
-        CompilingCost {
+        InstructionCost {
             success_rate: self.success_rate * rhs.success_rate, // monotonically decreasing
-            program_cost: self.program_cost + rhs.program_cost, // monotonically increasing
+            mem_cycles: self.mem_cycles + rhs.mem_cycles, // monotonically increasing
         }
     }
 }
 
-impl PartialEq for CompilingCost {
+impl PartialEq for InstructionCost {
     fn eq(&self, other: &Self) -> bool {
-        self.success_rate == other.success_rate && self.program_cost == other.program_cost
+        self.success_rate == other.success_rate && self.mem_cycles == other.mem_cycles
     }
 }
 
 /// First compare based on success-rate, then on program-cost
 /// TODO: more fine-grained comparison !!
-impl PartialOrd for CompilingCost {
+impl PartialOrd for InstructionCost {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -56,11 +55,11 @@ impl PartialOrd for CompilingCost {
 /// First compare based on success-rate, then on program-cost
 /// - [`Ordering::Greater`] = better
 /// TODO: more fine-grained comparison !!
-impl Ord for CompilingCost {
+impl Ord for InstructionCost {
     fn cmp(&self, other: &Self) -> Ordering {
         // better success-rate is always better than higher program-cost (TODO: improve this)
         if self.success_rate == other.success_rate { // TOOD: cmp based on some margin (eg +-0.2%)
-            self.program_cost.cmp(&other.program_cost) // lower is better
+            self.mem_cycles.cmp(&other.mem_cycles) // lower is better
         } else {
             self.success_rate.cmp(&other.success_rate).reverse() // higher is better
         }
@@ -68,7 +67,7 @@ impl Ord for CompilingCost {
 }
 
 impl CostFunction<AoigLanguage> for CompilingCostFunction {
-    type Cost = Rc<CompilingCost>;
+    type Cost = Rc<InstructionCost>;
 
     /// Compute cost of given `enode` using `cost_fn`
     ///
@@ -92,9 +91,9 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
         // get op-cost of executing `enode`:
         let op_cost = match *enode {
             AoigLanguage::False | AoigLanguage::Input(_) => {
-                CompilingCost {
+                InstructionCost {
                     success_rate: SuccessRate(1.0),
-                    program_cost: 1, // !=0 to ensure Cost-Function is *strictly monotonically increasing*
+                    mem_cycles: 1, // !=0 to ensure Cost-Function is *strictly monotonically increasing*
                 }
             },
             AoigLanguage::And([node1, node2]) => {
@@ -103,9 +102,9 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                     .iter().fold(0, |acc, instr| { acc + instr.get_nr_memcycles() as usize });
                 debug!("Cycles AND: {}",  mem_cycles_and);
                 let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
-                CompilingCost {
+                InstructionCost {
                     success_rate: SuccessRate(expected_success_rate),
-                    program_cost: mem_cycles_and,
+                    mem_cycles: mem_cycles_and,
                 }
 
             },
@@ -114,9 +113,9 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                     .iter().fold(0, |acc, instr| { acc + instr.get_nr_memcycles() as usize });
                 debug!("Cycles OR: {}",  mem_cycles_or);
                 let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
-                CompilingCost {
+                InstructionCost {
                     success_rate: SuccessRate(expected_success_rate),
-                    program_cost: mem_cycles_or,
+                    mem_cycles: mem_cycles_or,
                 }
             },
             // TODO: increase cost of NOT? (since it moves the value to another subarray!)
@@ -127,16 +126,16 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                 debug!("Cycles NOT: {}",  mem_cycles_not);
                 let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
 
-                CompilingCost {
+                InstructionCost {
                     success_rate: SuccessRate(expected_success_rate),
-                    program_cost: mem_cycles_not,
+                    mem_cycles: mem_cycles_not,
                 }
             },
             _ => {
                 // todo!();
-                CompilingCost {
+                InstructionCost {
                     success_rate: SuccessRate(1.0),
-                    program_cost: 7,
+                    mem_cycles: 7,
                 }
                 // 0 // TODO: implement for nary-ops, eg using `.children()`
             }
@@ -158,7 +157,7 @@ mod tests {
     use eggmock::{AoigLanguage, ComputedNetworkWithBackwardEdges, Network};
 
     use crate::fc_dram::compiler::Compiler;
-    use crate::fc_dram::egraph_extraction::CompilingCostFunction;
+    use crate::fc_dram::cost_estimation::CompilingCostFunction;
     use crate::fc_dram::CompilerSettings;
 
     use super::*;
