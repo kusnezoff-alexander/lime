@@ -7,7 +7,7 @@
 //! - [`Compiler::compile()`] = main function - compiles given logic network for the given [`architecture`] into a [`program`] using some [`optimization`]
 
 use super::{
-    architecture::{subarrayid_to_subarray_address, Instruction, LogicOp, SubarrayId, SupportedNrOperands, ARCHITECTURE, NR_SUBARRAYS, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
+    architecture::{subarrayid_to_subarray_address, Instruction, LogicOp, NeighboringSubarrayRelPosition, SubarrayId, SupportedNrOperands, ARCHITECTURE, NR_SUBARRAYS, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
 };
 use eggmock::{Aoig, Id, NetworkWithBackwardEdges, Node, Signal};
 use itertools::Itertools;
@@ -104,16 +104,23 @@ impl Compiler {
     }
 
     /// Rather than making sure rows in which live values reside remain untouched, this approach chooses to select fixed RowAddress combinations for all support numbers of operands
-    /// - this function sets [`Compiler::compute_row_activations`]
+    /// - this function sets [`Compiler::compute_row_activations`] to use as compute rows
     /// - NOTE: this choice is expected to be applicable to row activations in all subarrays since the SRA work equivalently between subarrays
     ///     - ASSUMPTION: there are no architectural differences btw subarrays
     ///
+    /// # Limitations
+    ///
+    /// There are several drawbacks of choosing fixed compute rows:
+    /// 1. *LogicOp* is not taken into consideration: different compute rows might (in theory) perform better for specific LogicOps (see [`LogicOp::get_success_rate_by_row_distance()`] which returns different SuccessRates based on the corresponding LogicOp)
+    /// 2. Compute Rows might perform better for the next subarray (+1) than for the previous (-1) subarray (choice of subarray determines which SenseAmps are used and hence the distance btw rows and SenseAmps)
+    ///
+    /// This choice aims to finding a good compromise btw those limitations.
     /// TODO: NEXT
     fn choose_compute_rows(&mut self) {
         for nr_operands in SupportedNrOperands::iter() {
             let possible_row_combis = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&nr_operands).expect("Given Architecture doesn't support SRA of {nr_operands} operands");
             possible_row_combis.iter().fold(possible_row_combis[0], |best_row_combi, next_row_combi| {
-                // TODO: compare row-combis based on success-rate and return better one of them
+                // compare row-combis based on avg success-rate and return the better one of them
 
                 let success_rate_avg_next_row = 0;
                 let success_rate_avg_best_row = 0;
@@ -129,7 +136,7 @@ impl Compiler {
     /// - NOTE: nr of safe-space rows must be a power of 2 (x) between 1<=x<=64
     /// - [ ] TODO: improve algo (in terms of space efficiency)
     ///
-    /// PROBLEM: can't test all possibilities since (for nrr safe-space rows=16) there are  `math.comb(512,16) = 841141456821158064519401490400 = 8,4*10^{29}` of them
+    /// PROBLEM: can't test all possibilities since (for nr safe-space rows=16) there are  `math.comb(512,16) = 841141456821158064519401490400 = 8,4*10^{29}` of them
     fn alloc_safe_space_rows(&mut self, nr_safe_space_rows: u8) {
 
         let supported_nr_safe_space_rows = vec!(1,2,4,8,16,32,64);
@@ -331,11 +338,12 @@ impl Compiler {
         }
     }
 
-    /// Places the referenced `src_operands` into the corresponding `row_addresses` which are expected to be simultaneously executed
-    fn init_compute_subarray(&mut self, mut row_addresses: Vec<RowAddress>, mut src_operands: Vec<Signal>, logic_op: LogicOp) -> Vec<Instruction> {
+    /// Places the referenced `src_operands` into the corresponding `row_addresses` which are expected to be simultaneously executed using [`Instruction::RowCloneFPM`]
+    /// - NOTE: `rel_pos_of_ref_subarray` might affect placement of inputs in the future (eg to choose which input rows to choose for *input replication*)
+    fn init_compute_subarray(&mut self, mut row_addresses: Vec<RowAddress>, mut src_operands: Vec<Signal>, logic_op: LogicOp, rel_pos_of_ref_subarray: NeighboringSubarrayRelPosition) -> Vec<Instruction> {
         let mut instructions = vec!();
         // if there are fewer src-operands than activated rows perform input replication
-        row_addresses.sort_by_key(|row| ((ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row))); // replicate input that resides in row with lowest success-rate (=probably the row furthest away)
+        row_addresses.sort_by_key(|row| ((ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, rel_pos_of_ref_subarray.clone()))); // replicate input that resides in row with lowest success-rate (=probably the row furthest away)
         let nr_elements_to_extend = row_addresses.len() - src_operands.len();
         if nr_elements_to_extend > 0 {
             let last_element = *src_operands.last().unwrap();
@@ -351,7 +359,7 @@ impl Compiler {
             if (src_operand_location & SUBARRAY_ID_BITMASK) == (row_addr & SUBARRAY_ID_BITMASK) {
                 instructions.push(Instruction::RowCloneFPM(src_operand_location, row_addr, String::from("Move operand to compute row")));
             } else {
-                instructions.push(Instruction::RowClonePSM(src_operand_location, row_addr));
+                instructions.push(Instruction::RowClonePSM(src_operand_location, row_addr)); // TODO: remove this, since it's not usable in COTS DRAMs
             }
         }
         instructions
@@ -486,8 +494,8 @@ impl Compiler {
         // TODO: extract NOT
         let logic_op = match language_op {
             // REMINDER: operand-nr is extracted by looking at nr of children beforehand
-            Aoig::And(_) | Aoig::And4(_) | Aoig::And8(_)| Aoig::And16(_)| Aoig::And32(_) => LogicOp::AND,
-            Aoig::Or(_) | Aoig::Or4(_) | Aoig::Or8(_) | Aoig::Or16(_) | Aoig::Or32(_) => LogicOp::OR,
+            Aoig::And(_) | Aoig::And4(_) | Aoig::And8(_)| Aoig::And16(_) => LogicOp::AND,
+            Aoig::Or(_) | Aoig::Or4(_) | Aoig::Or8(_) | Aoig::Or16(_) => LogicOp::OR,
             _ => panic!("candidate is expected to be a logic op"),
         };
 
@@ -514,7 +522,7 @@ impl Compiler {
         next_instructions.append(&mut instruction_init_ref_subarray);
 
         // 2. Place rows in the simultaneously activated rows in the compute subarray (init other rows with 0 for OR, 1 for AND and same value for NOT)
-        let mut instructions_init_comp_subarray = self.init_compute_subarray( activated_rows.clone(), src_operands, logic_op);
+        let mut instructions_init_comp_subarray = self.init_compute_subarray( activated_rows.clone(), src_operands, logic_op, NeighboringSubarrayRelPosition::get_relative_position(compute_subarray, ref_subarray));
         next_instructions.append(&mut instructions_init_comp_subarray);
 
         // SKIPPED: 2.2 Check if issuing `APA(src1,src2)` would activate other rows which hold valid data

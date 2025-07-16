@@ -1,4 +1,4 @@
-//! Computation of Cost-Metrics (eg includes success rate)
+//! Computation of Cost-Metrics (currently includes success rate and nr of mem-cycles)
 
 use eggmock::egg::{CostFunction, Id};
 use eggmock::{AoigLanguage, egg::Language};
@@ -92,8 +92,8 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
         let op_cost = match *enode {
             AoigLanguage::False | AoigLanguage::Input(_) => {
                 InstructionCost {
-                    success_rate: SuccessRate(1.0),
-                    mem_cycles: 1, // !=0 to ensure Cost-Function is *strictly monotonically increasing*
+                    success_rate: SuccessRate::new(1.0),
+                    mem_cycles: 1, // !=0 to ensure Cost-Function is *strictly monotonically increasing* (TODO: monotonicity isn"t needed here, right?")
                 }
             },
             AoigLanguage::And([node1, node2]) => {
@@ -103,7 +103,7 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                 debug!("Cycles AND: {}",  mem_cycles_and);
                 let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
                 InstructionCost {
-                    success_rate: SuccessRate(expected_success_rate),
+                    success_rate: SuccessRate::new(expected_success_rate),
                     mem_cycles: mem_cycles_and,
                 }
 
@@ -114,7 +114,7 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                 debug!("Cycles OR: {}",  mem_cycles_or);
                 let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
                 InstructionCost {
-                    success_rate: SuccessRate(expected_success_rate),
+                    success_rate: SuccessRate::new(expected_success_rate),
                     mem_cycles: mem_cycles_or,
                 }
             },
@@ -127,14 +127,14 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                 let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
 
                 InstructionCost {
-                    success_rate: SuccessRate(expected_success_rate),
+                    success_rate: SuccessRate::new(expected_success_rate),
                     mem_cycles: mem_cycles_not,
                 }
             },
             _ => {
                 // todo!();
                 InstructionCost {
-                    success_rate: SuccessRate(1.0),
+                    success_rate: SuccessRate::new(1.0),
                     mem_cycles: 7,
                 }
                 // 0 // TODO: implement for nary-ops, eg using `.children()`

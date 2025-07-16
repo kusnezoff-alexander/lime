@@ -6,6 +6,7 @@
 //! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of RowAddress
 
 use std::{cmp::Ordering, collections::{HashMap, HashSet}, fmt::{Display, Formatter}, ops, sync::LazyLock};
+use log::debug;
 use strum_macros::EnumIter;
 
 pub const NR_SUBARRAYS: u64 = 2u64.pow(7);
@@ -20,6 +21,27 @@ pub fn subarrayid_to_subarray_address(subarray_id: SubarrayId) -> RowAddress {
 
 pub fn get_subarrayid_from_rowaddr(row: RowAddress) -> SubarrayId {
     (row & SUBARRAY_ID_BITMASK) >> NR_SUBARRAYS.ilog2()
+}
+
+/// All Subarrays (except the ones at the edges) have two neighboring subarrays: one below (subarray_id+1) and one above (subarray_id-1)
+#[derive(Debug, Clone, PartialEq)]
+pub enum NeighboringSubarrayRelPosition {
+    /// `subarray_id-1`
+    Above,
+    /// `subarray_id+1`
+    Below,
+}
+
+impl NeighboringSubarrayRelPosition {
+    /// Get whether `subarray1` is above or below `relative_to`
+    pub fn get_relative_position(subarray: SubarrayId, relative_to: SubarrayId) -> Self {
+        assert!((subarray as isize - relative_to as isize).abs() == 1, "Given Arrays are not neighboring arrays");
+        if subarray > relative_to {
+            NeighboringSubarrayRelPosition::Below
+        } else {
+            NeighboringSubarrayRelPosition::Above
+        }
+    }
 }
 
 /// Main variable specifying architecture of DRAM-module for which to compile for
@@ -79,31 +101,24 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
     };
 
     // just a dummy implementation, see [5] Chap3.2 for details why determining the distance based on the Row Addresses issued by the MemController is difficult
-    let get_distance_of_row_to_sense_amps = |row: RowAddress| -> RowDistanceToSenseAmps {
-        // ASSUMPTION: last & first rows only have sense-amps from one side
-        // TODO: is this true? or do all subarrays have a line of sense-amps on both of their ends??
-        let distance_to_nearest_sense_amp_in_nr_rows = if row < ROWS_PER_SUBARRAY {
-            // this row is in the first subarray
-            row // row-addr = distance to nearest sense-amps
-        } else if  row > (NR_SUBARRAYS-1)*ROWS_PER_SUBARRAY {
-            // this row is in the last subarray
-            row - (NR_SUBARRAYS-1)*ROWS_PER_SUBARRAY // =distance to above sense-amps
-        } else {
-            // let subarray_id = row / rows_per_subarray;
-            let row_nr_in_subarray = row % ROWS_PER_SUBARRAY;
-            if row_nr_in_subarray < ROWS_PER_SUBARRAY {
-                // row is in the 1st half of the subarray and hence nearer to the "previous" sense-amps
-                row_nr_in_subarray
-            } else {
-                // row is in the 2nd half of the subarray and hence nearer to the "previous" sense-amps
-                row_nr_in_subarray - ROWS_PER_SUBARRAY/2
-            }
+    // TODO: NEXT
+    let get_distance_of_row_to_sense_amps = |row: RowAddress, subarray_rel_position: NeighboringSubarrayRelPosition| -> RowDistanceToSenseAmps {
+        // NOTE: last & first subarrays only have sense-amps from one side
+        if (get_subarrayid_from_rowaddr(row) == NR_SUBARRAYS-1 && subarray_rel_position == NeighboringSubarrayRelPosition::Below) || (get_subarrayid_from_rowaddr(row) == 0 && subarray_rel_position == NeighboringSubarrayRelPosition::Above) {
+            panic!("Edge subarrays have sense-amps only connected from one side");
+        }
 
-        };
-        match distance_to_nearest_sense_amp_in_nr_rows {
+        let local_row_address= row & ROW_ID_BITMASK;
+
+        let distance_to_above_subarray = match local_row_address {
             i if i < ROWS_PER_SUBARRAY / 2 / 3 => RowDistanceToSenseAmps::Close,   // 1st third  of subarray-half
             i if i < ROWS_PER_SUBARRAY / 2 / 6 => RowDistanceToSenseAmps::Middle,  // 2nd third  of subarray-half
             _ => RowDistanceToSenseAmps::Far,                                           // everything else is treated as being far away
+        };
+
+        match subarray_rel_position {
+            NeighboringSubarrayRelPosition::Above => distance_to_above_subarray,
+            NeighboringSubarrayRelPosition::Below => distance_to_above_subarray.reverse(), // rows close to above subarray are far from below subarray etc
         }
     };
 
@@ -165,6 +180,16 @@ pub type SubarrayId = u64;
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct SuccessRate(pub f64);
 
+impl SuccessRate {
+    pub fn new(success_rate: f64) -> Self {
+        if (0.0..=1.0).contains(&success_rate) {
+            SuccessRate(success_rate)
+        } else {
+            panic!("SuccessRate must in [0,1], but was {success_rate}");
+        }
+    }
+}
+
 impl Eq for SuccessRate {}
 
 impl PartialOrd for SuccessRate {
@@ -183,13 +208,13 @@ impl ops::Mul<SuccessRate> for SuccessRate {
     type Output = SuccessRate;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        SuccessRate(rhs.0 * self.0)
+        SuccessRate::new(rhs.0 * self.0)
     }
 }
 
 impl From<f64> for SuccessRate {
     fn from(val: f64) -> Self {
-        SuccessRate(val)
+        SuccessRate::new(val)
     }
 }
 
@@ -235,7 +260,7 @@ pub struct FCDRAMArchitecture {
     /// Given a row-addr this returns the distance of it to the sense-amps (!determinse success-rate of op using that `row` as an operand) (see [1] Chap5.2)
     /// - NOTE: a realistic implementation should use the Methodology from [1] to determine this distance (RowHammer)
     ///     - there is no way of telling the distance of a row without testing manually (see [5] Chap3.2: "consecutive row addresses issued by the memory controller can be mapped to entirely different regions of DRAM")
-    pub get_distance_of_row_to_sense_amps: fn(RowAddress) -> RowDistanceToSenseAmps,
+    pub get_distance_of_row_to_sense_amps: fn(RowAddress, NeighboringSubarrayRelPosition) -> RowDistanceToSenseAmps,
 }
 
 /// Implement this trait for your specific DRAM-module to support FCDRAM-functionality
@@ -295,6 +320,17 @@ pub enum RowDistanceToSenseAmps {
     Far=0,
 }
 
+impl RowDistanceToSenseAmps {
+    /// Reverse distance (Far-> Close, Middle -> Middle, Close->Far), useful when row's distance to other neighboring subarray (below/above) is needed
+    pub fn reverse(&self) -> Self {
+        match &self {
+            RowDistanceToSenseAmps::Close => RowDistanceToSenseAmps::Far,
+            RowDistanceToSenseAmps::Middle=> RowDistanceToSenseAmps::Middle,
+            RowDistanceToSenseAmps::Far=> RowDistanceToSenseAmps::Close,
+        }
+    }
+}
+
 type Comment = String;
 /// Instructions used in FC-DRAM
 /// - NOT: implemented using `APA`
@@ -317,11 +353,11 @@ pub enum Instruction {
     FracOp(RowAddress),
     /// Multiple-Row Activation: `ACT R_F -> PRE -> ACT R_L -> PRE` of rows `R_F`,`R_L` for rows within
     /// different subarrays. As a result `R_L` holds the negated value of `R_F` (see Chap5.1 of PaperFunctionally Complete DRAMs
-    /// Used to implement NOT directly
+    /// src=1st operand, dst=2nd operand
     ApaNOT(RowAddress,RowAddress),
     /// Multiple-Row Activation: `ACT R_F -> PRE -> ACT R_L -> PRE` of rows `R_F`,`R_L` for rows within
     /// different subarrays (but with different timings than `ApaNOT`!)
-    /// Used to implement `AND`&`OR` (!make sure to init reference subarray beforehand)
+    /// src=1st operand, dst=2nd operand
     ApaAndOr(RowAddress,RowAddress),
     /// Fast-Parallel-Mode RowClone for cloning row-data within same subarray
     /// - corresponds to `AA`, basically copies from src-row -> row-buffer -> dst-row
@@ -361,6 +397,7 @@ impl Display for Instruction {
 /// row-addresses
 impl Instruction {
 
+    /// TODO: rewrite this (eg `ApaNOT` and `ApaAndOr` take different amount of time !!, see Figure
     pub fn get_nr_memcycles(&self) -> u16 {
         match self {
             Instruction::FracOp(__) => 7,     // see [2] ChapIII.A, (two cmd-cycles + five idle cycles)
@@ -372,7 +409,7 @@ impl Instruction {
         }
     }
 
-    /// Success Rate off instructions depends on:
+    /// Success Rate of instructions depends on:
     /// - for AND/OR (`APA`): number of input operands (see [1] Chap6.3)
     ///     - data pattern can't be taken into consideration here since its not known at compile-time
     ///     - as well as temperature and DRAM speed rate
@@ -387,8 +424,8 @@ impl Instruction {
 
         // include nr of operands and distance of rows to sense-amps into success-rate
         match self {
-            Instruction::ApaNOT( r1, r2) => {
-                let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(*r1,*r2)).expect("[ERR] Missing SRA for ({r1},{r2}");
+            Instruction::ApaNOT( src, dst) => {
+                let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(*src,*dst)).expect("[ERR] Missing SRA for ({r1},{r2}");
                 let nr_operands = activated_rows.len(); // ASSUMPTION: it seems like "operands" referred to the number of activated rows (see [1]
                 // taken from [1] Chap6.3
                 let success_rate_per_operandnr = HashMap::from([
@@ -400,20 +437,21 @@ impl Instruction {
                 ]);
                 // nr_operand_success_rate.get(&nr_operands);
 
+                let (src_array, dst_array) = (get_subarrayid_from_rowaddr(*src), get_subarrayid_from_rowaddr(*dst));
                 let furthest_src_row = activated_rows.iter()
-                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row)) // RowDistanceToSenseAmps::Far; // TODO: get this
+                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, NeighboringSubarrayRelPosition::get_relative_position(src_array, dst_array))) // RowDistanceToSenseAmps::Far; // TODO: get this
                     .max()
                     .expect("[ERR] Activated rows were empty");
                 // NOTE: SRA is assumed to activate the same row-addresses in both subarrays
                 let closest_dst_row = activated_rows.iter()
-                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row)) // RowDistanceToSenseAmps::Far; // TODO: get this
+                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, NeighboringSubarrayRelPosition::get_relative_position(dst_array, src_array))) // RowDistanceToSenseAmps::Far; // TODO: get this
                     .min()
                     .expect("[ERR] Activated rows were empty");
                 let total_success_rate = *success_rate_per_operandnr.get(&nr_operands).expect("[ERR] {nr_operands} not =1|2|4|8|16, the given SRA function seems to not comply with this core assumption.")
                     * success_rate_by_row_distance.get(&(furthest_src_row, closest_dst_row)).unwrap().0;
-                SuccessRate(total_success_rate)
+                SuccessRate::new(total_success_rate)
             },
-            _ => SuccessRate(1.0),
+            _ => SuccessRate::new(1.0),
         }
     }
 }
@@ -498,16 +536,71 @@ impl LogicOp {
                 ]),
             }
     }
+
+    /// taken from Figure7 (NOT) & Figure15 (AND/OR/NAND/NOR) in [1] (using Mean-dot)
+    /// - NOTE: since the values have been read from the diagram they might differ +-3% from the actually measured values
+    ///     - remeasuring the values on own setup might be beneficial here !
+    ///
+    /// In General:
+    /// - for AND/OR/NAND/NOR: "The success rate of bitwise operations consistently increases as the number of input operands increases." (see Observation 11 [1])
+    /// - for NOT: seems to be the opposite
+    pub fn get_success_rate_by_nr_operands(&self) -> HashMap<SupportedNrOperands, SuccessRate> {
+       match self {
+            LogicOp::NOT => HashMap::from([
+                    // ((src,dst), success_rate)
+                    (SupportedNrOperands::One, 98.5.into()),
+                    (SupportedNrOperands::Two, 97.5.into()),
+                    (SupportedNrOperands::Four, 97.0.into()),
+                    (SupportedNrOperands::Eight, 28.0.into()),
+                    (SupportedNrOperands::Sixteen, 10.0.into()),
+                    (SupportedNrOperands::Thirtytwo, 8.0.into()),
+                ]),
+            LogicOp::AND => HashMap::from([
+                    // ((reference,compute), success_rate)
+                    (SupportedNrOperands::Two, 86.0.into()),
+                    (SupportedNrOperands::Four, 91.5.into()),
+                    (SupportedNrOperands::Eight, 92.5.into()),
+                    (SupportedNrOperands::Sixteen, 96.0.into()),
+                ]),
+            LogicOp::OR => HashMap::from([
+                    // ((reference,compute), success_rate)
+                    // TODO
+                    (SupportedNrOperands::Two, 97.5.into()),
+                    (SupportedNrOperands::Four, 97.0.into()),
+                    (SupportedNrOperands::Eight, 28.0.into()),
+                    (SupportedNrOperands::Sixteen, 10.0.into()),
+                ]),
+            LogicOp::NAND => HashMap::from([
+                    // ((reference,compute), success_rate)
+                    // TODO
+                    (SupportedNrOperands::Two, 97.5.into()),
+                    (SupportedNrOperands::Four, 97.0.into()),
+                    (SupportedNrOperands::Eight, 28.0.into()),
+                    (SupportedNrOperands::Sixteen, 10.0.into()),
+                ]),
+            LogicOp::NOR => HashMap::from([
+                    // ((reference,compute), success_rate)
+                    // TODO
+                    (SupportedNrOperands::Two, 97.5.into()),
+                    (SupportedNrOperands::Four, 97.0.into()),
+                    (SupportedNrOperands::Eight, 28.0.into()),
+                    (SupportedNrOperands::Sixteen, 10.0.into()),
+                ]),
+            }
+    }
 }
 
+/// Support operands numbers for AND/OR/NOT operations
 #[derive(Debug, EnumIter, Hash, PartialEq, Eq)]
 #[repr(u8)] // You can change the representation (e.g., u8, u16, etc.)
 pub enum SupportedNrOperands {
+    /// One operand only supported for `NOT`
     One = 1,
     Two = 2,
     Four = 4,
     Eight = 8,
     Sixteen = 16,
+    /// Only performed for `NOT`
     Thirtytwo = 32
 }
 
