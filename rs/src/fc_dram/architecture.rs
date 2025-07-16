@@ -24,7 +24,7 @@ pub fn get_subarrayid_from_rowaddr(row: RowAddress) -> SubarrayId {
 }
 
 /// All Subarrays (except the ones at the edges) have two neighboring subarrays: one below (subarray_id+1) and one above (subarray_id-1)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub enum NeighboringSubarrayRelPosition {
     /// `subarray_id-1`
     Above,
@@ -313,6 +313,7 @@ impl FCDRAMArchitecture {
 }
 
 /// Categories of distances of rows to sense-amops
+/// - HIB (higher is better): that's why [`RowDistanceToSenseAmps::Close`] has the highest int value
 #[derive(Hash,Eq,PartialEq,PartialOrd,Ord)]
 pub enum RowDistanceToSenseAmps {
     Close=2,
@@ -411,8 +412,8 @@ impl Instruction {
 
     /// Success Rate of instructions depends on:
     /// - for AND/OR (`APA`): number of input operands (see [1] Chap6.3)
-    ///     - data pattern can't be taken into consideration here since its not known at compile-time
-    ///     - as well as temperature and DRAM speed rate
+    ///     - data pattern can't be taken into consideration here since its not known at compile-time (unknown at compile-time)
+    ///     - as well as temperature and DRAM speed rate (ignored here)
     ///
     /// TAKEAWAY: `OR` is more reliable than `AND`
     pub fn get_success_rate_of_apa(&self, implemented_op: LogicOp) -> SuccessRate {
@@ -591,7 +592,7 @@ impl LogicOp {
 }
 
 /// Support operands numbers for AND/OR/NOT operations
-#[derive(Debug, EnumIter, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, EnumIter, Hash, PartialEq, Eq)]
 #[repr(u8)] // You can change the representation (e.g., u8, u16, etc.)
 pub enum SupportedNrOperands {
     /// One operand only supported for `NOT`

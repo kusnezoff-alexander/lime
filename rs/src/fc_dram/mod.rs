@@ -56,6 +56,10 @@ static REWRITE_RULES: LazyLock<Vec<Rewrite<AoigLanguage, ()>>> = LazyLock::new(|
         rewrite!("or-and-more-not"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
         rewrite!("and-same"; "(and ?a ?a)" => "?a"),
         rewrite!("not_not"; "(! (! ?a))" => "?a"),
+        rewrite!("and2_to_4"; "(and (and ?a ?b) (and ?c ?d))" => "(and4 ?a ?b ?c ?d)"),
+        // TODO:
+        // rewrite!("and4_to_8"; "(and (and ?a ?b) (and ?c ?d))" => "(and ?a ?b ?c ?d)"),
+        // rewrite!("and8_to_16"; "(and (and ?a ?b) (and ?c ?d))" => "(and ?a ?b ?c ?d)"),
         // rewrite!("maj_1"; "(maj ?a ?a ?b)" => "?a"),
         // rewrite!("maj_2"; "(maj ?a (! ?a) ?b)" => "?b"),
         // rewrite!("associativity"; "(maj ?a ?b (maj ?c ?b ?d))" => "(maj ?d ?b (maj ?c ?b ?a))"),

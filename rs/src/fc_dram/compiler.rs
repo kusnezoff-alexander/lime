@@ -15,7 +15,7 @@ use log::debug;
 use priority_queue::PriorityQueue;
 use strum::IntoEnumIterator;
 use toml::{Table, Value};
-use std::{cmp::Ordering, collections::{HashMap, HashSet}, ffi::CStr, fmt::Debug, fs, path::Path};
+use std::{cmp::Ordering, collections::{HashMap, HashSet}, env::consts::ARCH, ffi::CStr, fmt::Debug, fs, path::Path};
 
 /// Provides [`Compiler::compile()`] to compile a logic network into a [`Program`]
 pub struct Compiler {
@@ -34,7 +34,7 @@ pub struct Compiler {
     /// For each nr of operands this field store the rowaddress-combination to issue to activate
     /// the desired nr of rows (the choice is made best on success-rate and maximizing the nr of rows which potentially can't be used for storage
     /// since they would activate rows where values could reside in)
-    compute_row_activations: HashMap<SupportedNrOperands, (RowAddress,RowAddress)>
+    compute_row_activations: HashMap<(SupportedNrOperands, NeighboringSubarrayRelPosition), (RowAddress,RowAddress)>
 }
 
 impl Compiler {
@@ -118,18 +118,42 @@ impl Compiler {
     /// TODO: NEXT
     fn choose_compute_rows(&mut self) {
         for nr_operands in SupportedNrOperands::iter() {
-            let possible_row_combis = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&nr_operands).expect("Given Architecture doesn't support SRA of {nr_operands} operands");
-            possible_row_combis.iter().fold(possible_row_combis[0], |best_row_combi, next_row_combi| {
-                // compare row-combis based on avg success-rate and return the better one of them
+            for sense_amp_position in NeighboringSubarrayRelPosition::iter() {
 
-                let success_rate_avg_next_row = 0;
-                let success_rate_avg_best_row = 0;
-                // take avg success-rate over all supported LogicOps (since compute rows are the same irrespective of the issued op)
-                for logic_op in LogicOp::iter() {
-                    // logic_op.get
-                }
-                todo!()
-            });
+                let possible_row_combis = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&nr_operands).expect("Given Architecture doesn't support SRA of {nr_operands} operands");
+                let best_row_combi = possible_row_combis.iter().fold(possible_row_combis[0], |best_row_combi, next_row_combi| {
+                    // compare row-combis based on avg success-rate and return the better one of them
+
+                    let avg_distance_next_row_combi: u64 = {
+                        let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(next_row_combi).unwrap();
+                        activated_rows.iter().map(|&row| {
+                            // move subarray to 1st subarray (instead of 0th, which is at the edge and hence has no sense-amps above)
+                            let subarray1_id = ((ROW_ID_BITMASK << 1) | 1) ^ ROW_ID_BITMASK;
+                            let row =  subarray1_id | row; // makes sure that `get_distance_of_row_to_sense_amps` doesn't panic since SRA returns subarray=0 by default (which is an edge subarray)
+                            println!("{row:b}");
+                            (ARCHITECTURE.get_distance_of_row_to_sense_amps)(row, sense_amp_position) as u64
+                        }).sum()
+                    };
+                    let avg_distance_best_row_combi: u64 = {
+                        // move subarray to 1st subarray (instead of 0th, which is at the edge and hence has no sense-amps above)
+                        let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(&best_row_combi).unwrap();
+                        activated_rows.iter().map(|&row| {
+                            let subarray1_id = ((ROW_ID_BITMASK << 1) | 1) ^ ROW_ID_BITMASK;
+                            let row =  subarray1_id | row; // makes sure that `get_distance_of_row_to_sense_amps` doesn't panic since SRA returns subarray=0 by default (which is an edge subarray)
+                            println!("{row:b}");
+                            (ARCHITECTURE.get_distance_of_row_to_sense_amps)(row, sense_amp_position) as u64
+                        }).sum()
+                    };
+
+                    if avg_distance_next_row_combi > avg_distance_best_row_combi {
+                        *next_row_combi
+                    } else {
+                        best_row_combi
+                    }
+                });
+
+                self.compute_row_activations.insert((nr_operands, sense_amp_position), best_row_combi);
+            }
         }
     }
     /// Allocates safe-space rows inside the DRAM-module
@@ -268,7 +292,8 @@ impl Compiler {
             fs::write(config, config_in_toml.to_string()).expect("Sth went wrong here..");
         }
         // TODO: allow reading these in from config-file
-        // self.choose_compute_rows(); // choose which rows will serve as compute rows (those are stored in `self.compute_row_activations`
+        self.choose_compute_rows(); // choose which rows will serve as compute rows (those are stored in `self.compute_row_activations`
+        println!("{:?}", self.compute_row_activations);
         self.place_constants(); // TODO: move into config-file too?
 
         // deactivate all combination which could activate safe-space rows

@@ -7,11 +7,9 @@ use std::cmp::Ordering;
 use std::ops;
 use std::rc::Rc;
 
-use super::architecture::{FCDRAMArchitecture, LogicOp, SuccessRate};
+use super::architecture::{FCDRAMArchitecture, LogicOp, NeighboringSubarrayRelPosition, RowAddress, RowDistanceToSenseAmps, SuccessRate};
 
 pub struct CompilingCostFunction{}
-
-// impl StackedPartialGraph { } // Do I need this??
 
 /// A metric that estimates the runtime cost of executing an [`super::Instruction`] (in the program)
 #[derive(Debug, Clone, Copy, Eq)]
@@ -89,6 +87,7 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
         // TODO: rewrite to `.fold()`
 
         // get op-cost of executing `enode`:
+        // TODO: return higher success-rates for higher n in nary AND/OR
         let op_cost = match *enode {
             AoigLanguage::False | AoigLanguage::Input(_) => {
                 InstructionCost {
