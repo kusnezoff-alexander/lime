@@ -106,16 +106,16 @@ fn compiling_receiver<'a>(
             );
             // 1. Create E-Graph: run equivalence saturation
             debug!("Running equivalence saturation...");
-            let runner = measure_time!(
-                Runner::default().with_egraph(graph).run(rules),  "t_runner", settings.print_compilation_stats
-            );
-
-            if settings.verbose {
-                println!("== Runner Report");
-                runner.print_report();
-            }
-
-            let graph = runner.egraph;
+            // let runner = measure_time!(
+            //     Runner::default().with_egraph(graph).run(rules),  "t_runner", settings.print_compilation_stats
+            // );
+            //
+            // if settings.verbose {
+            //     println!("== Runner Report");
+            //     runner.print_report();
+            // }
+            //
+            // let graph = runner.egraph;
 
             CompilerOutput::new(
                 graph,

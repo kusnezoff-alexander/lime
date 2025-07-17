@@ -23,18 +23,15 @@ pub struct Compiler {
     settings: CompilerSettings,
     /// Stores the state of all rows at each compilation step
     comp_state: CompilationState,
-    /// These rows are reserved in EVERY subarray for storing intermediate results (ignore higher bits of these RowAddress)
-    /// - NOTE: only initialized when compilation starts
-    /// - NOTE2: all safe-space rows are treated equally, since no computation is performed on them (and hence distance to sense-amps doesn't really matter)
-    ///
-    /// DEPRECATED: use `blocked_row_combinations` instead (all other rows are safe-space rows)
-    safe_space_rows: Vec<RowAddress>,
-    /// RowCombinations which are not allowed to be issued via `APA` since they activate rows within the safe-space
-    blocked_row_combinations: HashSet<(RowAddress,RowAddress)>,
     /// For each nr of operands this field store the rowaddress-combination to issue to activate
     /// the desired nr of rows (the choice is made best on success-rate and maximizing the nr of rows which potentially can't be used for storage
     /// since they would activate rows where values could reside in)
-    compute_row_activations: HashMap<(SupportedNrOperands, NeighboringSubarrayRelPosition), (RowAddress,RowAddress)>
+    /// - This is a Design Decision taken: compute rows are rows reserved for performing computations, all other rows are usable as "Register"
+    compute_row_activations: HashMap<(SupportedNrOperands, NeighboringSubarrayRelPosition), (RowAddress,RowAddress)>,
+    /// Stores all subarrays in which the signal has to be available
+    signal_to_subarrayids: HashMap<Signal, Vec<SubarrayId>>,
+    /// see [`Self::get_all_noninverted_src_signals`]. First `Vec<Signal>`=noninverted src signals, 2nd `Vec<Signal>`=inverted src signals
+    computed_noninverted_scr_signals: HashMap<Signal, (Vec<Signal>,Vec<Signal>)>,
 }
 
 impl Compiler {
@@ -42,9 +39,9 @@ impl Compiler {
         Compiler{
            settings,
            comp_state: CompilationState::new( HashMap::new() ),
-           safe_space_rows: vec!(),
-           blocked_row_combinations: HashSet::new(),
            compute_row_activations: HashMap::new(),
+           signal_to_subarrayids: HashMap::new(),
+           computed_noninverted_scr_signals: HashMap::new(),
         }
     }
 
@@ -156,50 +153,25 @@ impl Compiler {
             }
         }
     }
-    /// Allocates safe-space rows inside the DRAM-module
-    /// - NOTE: nr of safe-space rows must be a power of 2 (x) between 1<=x<=64
-    /// - [ ] TODO: improve algo (in terms of space efficiency)
-    ///
-    /// PROBLEM: can't test all possibilities since (for nr safe-space rows=16) there are  `math.comb(512,16) = 841141456821158064519401490400 = 8,4*10^{29}` of them
-    fn alloc_safe_space_rows(&mut self, nr_safe_space_rows: u8) {
-
-        let supported_nr_safe_space_rows = vec!(1,2,4,8,16,32,64);
-        if !supported_nr_safe_space_rows.contains(&nr_safe_space_rows) {
-            panic!("Only the following nr of rows are supported to be activated: {:?}, given: {}", supported_nr_safe_space_rows, nr_safe_space_rows);
-        }
-
-        // TODO: this is just a quick&dirty implementation. Solving this problem of finding optimal safe-space rows is probably worth solving for every DRAM-module once
-        self.safe_space_rows = {
-
-            // choose any row-addr combi activating exactly `nr_safe_space_rows` and choose all that activated rows to be safe-space rows
-            let chosen_row_addr_combi = ARCHITECTURE.sra_degree_to_rowaddress_combinations
-                .get(&SupportedNrOperands::try_from(nr_safe_space_rows).unwrap()).unwrap()
-                .first().unwrap(); // just take the first row-combi that activates `nr_safe_space_rows`
-            ARCHITECTURE.precomputed_simultaneous_row_activations.get(chosen_row_addr_combi).unwrap()
-                .iter().map(|row| row & ROW_ID_BITMASK) // reset subarray-id to all 0s
-                .collect()
-        };
-
-        // TODO: if any other rows are unusable as a consequence (bc activating them would activate another safe-space-row anytime) include those unusable rows into safe-space (else they're competely useless)
-    }
 
     /// Places (commonly used) constants in safe-space rows
     /// - ! all safe-space rows are assumed to be empty when placing constants (constans are the first things to be placed into safe-space rows)
     /// - currently placed constants: all 0s and all 1s (for [`Compiler::init_reference_subarray`]
     fn place_constants(&mut self) {
+        todo!();
         // place constants in EVERY subarray
-        for subarray in 0..NR_SUBARRAYS {
-            let mut safe_space = self.safe_space_rows.iter();
-
-            let row_address_0 = subarrayid_to_subarray_address(subarray) | safe_space.next().unwrap();
-            self.comp_state.constant_values.insert(0, row_address_0);
-            let row_address_1 = subarrayid_to_subarray_address(subarray) | safe_space.next().unwrap();
-            self.comp_state.constant_values.insert(1, row_address_1);
-            // does it make sense to store any other constants in safe-space??
-
-            self.comp_state.dram_state.insert(row_address_0, RowState { is_compute_row: false, live_value: None, constant: Some(0)} );
-            self.comp_state.dram_state.insert(row_address_1, RowState { is_compute_row: false, live_value: None, constant: Some(1)} );
-        }
+        // for subarray in 0..NR_SUBARRAYS {
+        //     let mut safe_space = self.safe_space_rows.iter();
+        //
+        //     let row_address_0 = subarrayid_to_subarray_address(subarray) | safe_space.next().unwrap();
+        //     self.comp_state.constant_values.insert(0, row_address_0);
+        //     let row_address_1 = subarrayid_to_subarray_address(subarray) | safe_space.next().unwrap();
+        //     self.comp_state.constant_values.insert(1, row_address_1);
+        //     // does it make sense to store any other constants in safe-space??
+        //
+        //     self.comp_state.dram_state.insert(row_address_0, RowState { is_compute_row: false, live_value: None, constant: Some(0)} );
+        //     self.comp_state.dram_state.insert(row_address_1, RowState { is_compute_row: false, live_value: None, constant: Some(1)} );
+        // }
     }
 
     /// Place inputs onto appropriate rows
@@ -207,17 +179,18 @@ impl Compiler {
     /// TODO: algo which looks ahead which input-row-placement might be optimal (->reduce nr of move-ops to move intermediate results around & keep inputs close to sense-amps
     /// TODO: parititon logic network into subgraphs s.t. subgraphs can be mapped onto subarrays reducing nr of needed moves
     fn place_inputs(&mut self, mut inputs: Vec<Id>) {
-        // naive implementation: start placing input on consecutive safe-space rows (continuing with next subarray once the current subarray has no more free safe-space rows)
-        // TODO: change input operand placement to be more optimal (->taking into account future use of those operands)
-        while let Some(next_input) = inputs.pop() {
-            // NOTE: some safe-space rows are reserved for constants
-            let free_safespace_row = self.get_next_free_safespace_row(None);
-
-            let initial_row_state = RowState { is_compute_row: false, live_value: Some(Signal::new(next_input, false)), constant: None };
-            let initial_value_state = ValueState { is_computed: true, row_location: Some(free_safespace_row) };
-            self.comp_state.dram_state.insert(free_safespace_row, initial_row_state);
-            self.comp_state.value_states.insert(Signal::new(next_input, false), initial_value_state);
-        }
+        todo!();
+        // // naive implementation: start placing input on consecutive safe-space rows (continuing with next subarray once the current subarray has no more free safe-space rows)
+        // // TODO: change input operand placement to be more optimal (->taking into account future use of those operands)
+        // while let Some(next_input) = inputs.pop() {
+        //     // NOTE: some safe-space rows are reserved for constants
+        //     let free_safespace_row = self.get_next_free_safespace_row(None);
+        //
+        //     let initial_row_state = RowState { is_compute_row: false, live_value: Some(Signal::new(next_input, false)), constant: None };
+        //     let initial_value_state = ValueState { is_computed: true, row_location: Some(free_safespace_row) };
+        //     self.comp_state.dram_state.insert(free_safespace_row, initial_row_state);
+        //     self.comp_state.value_states.insert(Signal::new(next_input, false), initial_value_state);
+        // }
     }
 
     /// Initialize candidates with all nodes that are computable
@@ -255,56 +228,69 @@ impl Compiler {
             .collect()
     }
 
-    /// Initialize compilation state: mark unsuable rows (eg safe-space rows), place input operands
+    /// Initialize compilation state: choose compute rows (by setting [`Self::compute_row_activations`], assign subarray-ids to each NodeId, return code to place input operands in `program`
     fn init_comp_state(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>, program: &mut Program) {
         let config_file = unsafe { CStr::from_ptr(self.settings.config_file) }.to_str().unwrap();
         let config = Path::new(config_file);
         println!("{:?}", config);
 
-        // 0.1 Allocate safe-space rows (for storing intermediate values and constants 0s&1s) safely
+        // 0.1 Allocate compute rows: rows reserved for performing computations, all other rows are usable as "Register"
         if config.is_file() {
 
-            let content = fs::read_to_string(config).unwrap();
-            let value = content.parse::<toml::Table>().unwrap(); // Parse into generic TOML Value :contentReference[oaicite:1]{index=1}
+            // let content = fs::read_to_string(config).unwrap();
+            // let value = content.parse::<toml::Table>().unwrap(); // Parse into generic TOML Value :contentReference[oaicite:1]{index=1}
+            //
+            // if let Some(arr) = value.get("safe_space_rows").and_then(|v| v.as_array()) {
+            //     println!("Found array of length {}", arr.len());
+            //         self.safe_space_rows = arr.iter().map(|v| {
+            //             v.as_integer().expect("Expected integer") as u64
+            //         }).collect();
+            // } else {
+            //     panic!("Config file doesn't contain value for safe-space-rows");
+            // }
 
-            if let Some(arr) = value.get("safe_space_rows").and_then(|v| v.as_array()) {
-                println!("Found array of length {}", arr.len());
-                    self.safe_space_rows = arr.iter().map(|v| {
-                        v.as_integer().expect("Expected integer") as u64
-                    }).collect();
-            } else {
-                panic!("Config file doesn't contain value for safe-space-rows");
-            }
+            // TODO: read&write this to&from config-file (added manually here in the meantiem)
+            self.compute_row_activations = HashMap::from([
+                ((SupportedNrOperands::One, NeighboringSubarrayRelPosition::Above), (8, 8)),
+                ((SupportedNrOperands::One, NeighboringSubarrayRelPosition::Below), (303, 303)),
+                ((SupportedNrOperands::Two, NeighboringSubarrayRelPosition::Above), (15, 79)),
+                ((SupportedNrOperands::Two, NeighboringSubarrayRelPosition::Below), (293, 357)),
+                ((SupportedNrOperands::Four, NeighboringSubarrayRelPosition::Above), (60, 42)),
+                ((SupportedNrOperands::Four, NeighboringSubarrayRelPosition::Below), (472, 412)),
+                ((SupportedNrOperands::Eight, NeighboringSubarrayRelPosition::Above), (42, 15)),
+                ((SupportedNrOperands::Eight, NeighboringSubarrayRelPosition::Below), (203, 283)),
+                ((SupportedNrOperands::Sixteen, NeighboringSubarrayRelPosition::Above), (32, 83)),
+                ((SupportedNrOperands::Sixteen, NeighboringSubarrayRelPosition::Below), (470, 252)),
+                ((SupportedNrOperands::Thirtytwo, NeighboringSubarrayRelPosition::Above), (307, 28)),
+                ((SupportedNrOperands::Thirtytwo, NeighboringSubarrayRelPosition::Below), (149, 318)),
+            ]);
+
 
         } else {
 
             // debug!("Compiling {:?}", network);
-            self.alloc_safe_space_rows(self.settings.safe_space_rows_per_subarray);
 
+            self.choose_compute_rows(); // choose which rows will serve as compute rows (those are stored in `self.compute_row_activations`
+            println!("{:?}", self.compute_row_activations);
             // self.place_constants();
 
-            let safe_space_rows_toml = Value::Array(self.safe_space_rows.iter().map(
-                |row| Value::Integer(*row as i64)
-            ).collect());
-            let config_in_toml = toml::toml! {
-                safe_space_rows = safe_space_rows_toml
-            };
-            fs::write(config, config_in_toml.to_string()).expect("Sth went wrong here..");
-        }
-        // TODO: allow reading these in from config-file
-        self.choose_compute_rows(); // choose which rows will serve as compute rows (those are stored in `self.compute_row_activations`
-        println!("{:?}", self.compute_row_activations);
-        self.place_constants(); // TODO: move into config-file too?
-
-        // deactivate all combination which could activate safe-space rows
-        for row in self.safe_space_rows.iter() {
-            for row_combi in ARCHITECTURE.row_activated_by_rowaddress_tuple.get(row).unwrap() {
-                self.blocked_row_combinations.insert(*row_combi);
-            }
+            // TODO: write chosen compute rows to config-file
+            // let safe_space_rows_toml = Value::Array(self.safe_space_rows.iter().map(
+            //     |row| Value::Integer(*row as i64)
+            // ).collect());
+            // let config_in_toml = toml::toml! {
+            //     safe_space_rows = safe_space_rows_toml
+            // };
+            // fs::write(config, config_in_toml.to_string()).expect("Sth went wrong here..");
         }
 
-        // 0.2 Place all inputs and mark them as being live
-        // TODO: add additional pass over graph: think about which inputs are needed in which subarray
+        // NEXT: 0.2 Group operands by subarray (ensure all operands are placed in the right subarray)
+        self.assign_signals_to_subarrays(network); // sets `self.signal_to_subarrayids`
+
+        // 0.3 Place all constants and inputs and mark the inputs as being live
+        self.place_constants(); // constants are placed in <u>each</u> subarray
+        todo!("NEXT");
+
         self.place_inputs( network.leaves().collect::<Vec<Id>>() ); // place input-operands into rows
         debug!("Placed inputs {:?} in {:?}", network.leaves().collect::<Vec<Id>>(), self.comp_state.value_states);
         // 0.3 Setup: store all network-nodes yet to be compiled
@@ -330,7 +316,101 @@ impl Compiler {
             }).collect();
     }
 
-    /// Returns instructions to initialize `ref_rows` in reference-subarray for corresponding logic-op
+    /// Assigns signals to subarrays and through this determines placement of those signal in the DRAM module
+    /// - sets [`Self::signal_to_subarrayids`]
+    ///
+    /// # Assumptions
+    ///
+    /// - assumes `network` is acyclic !
+    ///
+    /// # TODO
+    ///
+    /// - make sure nr of signals placed in a subarray is <= nr of available rows (without compute rows)
+    /// - think about merging subarray assignment (s.t. several outputs end up in same subarray, so that inputs can be reused among them)
+    fn assign_signals_to_subarrays(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>) {
+        // 1. determine all signals which go into outputs without being negated (and hence can be stored in same subarray)
+        //  - also store signals which do need to be negated (and process them in the next step)
+        //  - TODO: continue graph traversal with src-operands of the outputs (until primary inputs are reached)
+        let mut subarray_id = 1; // start with 1 since edge subarrays cant be used as compute subarrays
+        for output in network.outputs() {
+            self.signal_to_subarrayids.insert(output, vec!(subarray_id)); // determine (virtual) subarray in which output will reside
+            let (noninverted_src_signals, inverted_src_signals) = self.get_all_noninverted_src_signals(output, network);
+
+            println!("{:?}", noninverted_src_signals.clone());
+            // all directly (might in theory) reside in the same subarray as `output` (since no NOTS are inbtw which locate them to a neighboring subarray)
+            for connected_signal in noninverted_src_signals {
+                self.signal_to_subarrayids.entry(connected_signal).or_default().push(subarray_id); // determine (virtual) subarray in which output will reside
+            }
+
+            // place inverted signals in neighboring subarray
+            let neighboring_subarray = subarray_id - 1; // place signals that are inverted odd number of times in Above subarray (arbitrary decision, epxloring whether this makes a difference might be explored in future)
+            let mut unvisited_signals_in_same_subarray: Vec<Signal> = vec!(); // inverting even nr of times leads to signals being placed in same subarray
+            let mut unvisited_signals_in_neighboring_subarray = inverted_src_signals;
+            while !unvisited_signals_in_same_subarray.is_empty() || !unvisited_signals_in_neighboring_subarray.is_empty() {
+                // println!("Same subarray: {:?}", unvisited_signals_in_same_subarray);
+                // println!("Neighboring subarray: {:?}", unvisited_signals_in_neighboring_subarray);
+                if let Some(signal_neighboring_subarray) = unvisited_signals_in_neighboring_subarray.pop() {
+
+                    self.signal_to_subarrayids.entry(signal_neighboring_subarray).or_default().push(neighboring_subarray);
+                    // these are placed in the Above subarray (arbitrary decision, epxloring whether this makes a difference might be explored in future)
+                    let (signals_neighboring_subarray_of_output,  mut signals_same_subarray_as_output) = self.get_all_noninverted_src_signals(signal_neighboring_subarray, network);
+                    for inverted_signal in signals_neighboring_subarray_of_output {
+                        self.signal_to_subarrayids.entry(inverted_signal).or_default().push(neighboring_subarray);
+                    }
+
+                    unvisited_signals_in_same_subarray.append(&mut signals_same_subarray_as_output);
+                }
+
+                if let Some(signal_same_subarray) = unvisited_signals_in_same_subarray.pop() {
+
+                    self.signal_to_subarrayids.entry(signal_same_subarray).or_default().push(subarray_id);
+                    // signals inverted even nr of times are placed in the same subarray as the `output` Signal
+                    let (signals_same_subarray_of_output,  mut signals_neighboring_subarray_as_output) = self.get_all_noninverted_src_signals(signal_same_subarray, network);
+                    for signal in signals_same_subarray_of_output {
+                        self.signal_to_subarrayids.entry(signal).or_default().push(subarray_id);
+                    }
+
+                    unvisited_signals_in_neighboring_subarray.append(&mut signals_neighboring_subarray_as_output);
+                }
+            }
+
+            // for the beginning place all outputs in different subarrays. A 2nd pass may optimize/merge subarrays later on
+            subarray_id += 2; // maybe +=2 to account for negated operands being stored in neighboring subarray? (TODO: test with some example networks)
+        }
+
+
+        debug!("{:?}", self.signal_to_subarrayids);
+    }
+
+    /// Returns all src signals which are not inverted. These are exactly those signals that can be placed in the same subarray as.
+    ///
+    /// # Returns
+    ///
+    /// Tuple of
+    /// 1. Vector of src Signals that are **not** inverted
+    /// 2. Vector of src Signals that are indeed inverted (need to be processed further, only first inverted signal is returned for a subtree)
+    fn get_all_noninverted_src_signals(&mut self, signal: Signal, network: &impl NetworkWithBackwardEdges<Node = Aoig>) -> (Vec<Signal>, Vec<Signal>) {
+        let signal_node = network.node(signal.node_id());
+
+        let mut noninverted_src_signals = vec!();
+        let mut inverted_src_signals = vec!();
+        let mut stack_unvisited_noninverted_src_operands = Vec::from(signal_node.inputs());
+
+        while let Some(src_operand) = stack_unvisited_noninverted_src_operands.pop() {
+            if src_operand.is_inverted() {
+                inverted_src_signals.push(src_operand); // store subarray to which this input has to be placed to as a neighbor, further processing elsewhere
+            } else {
+                noninverted_src_signals.push(src_operand);
+                let src_operand_node = network.node(src_operand.node_id());
+                stack_unvisited_noninverted_src_operands.append(&mut Vec::from(src_operand_node.inputs()));
+            }
+        }
+
+        self.computed_noninverted_scr_signals.insert(signal, (inverted_src_signals.clone(), noninverted_src_signals.clone())); // to save (possible) recomputation next time
+        (noninverted_src_signals, inverted_src_signals)
+    }
+
+    /// Returns instructions to initialize all given `ref_rows` in reference-subarray for corresponding logic-op
     /// - NOTE: [1] doesn't describe how the 0s/1s get into the reference subarray. We use `RowCloneFPM` ([4])) to copy the constant 0s/1s from the reserved safe-space row into the corresponding reference subarray row
     fn init_reference_subarray(&self, mut ref_rows: Vec<RowAddress>, logic_op: LogicOp) -> Vec<Instruction> {
         match logic_op {
@@ -390,54 +470,6 @@ impl Compiler {
         instructions
     }
 
-    /// Return sequence of instructions to provide negated inputs (if there are any among `src_operands`)).
-    ///
-    /// NOTE: Some inputs may be needed in a negated form by the candidates. To start execution those
-    /// input operands have to be available with their negated form.
-    /// TODO: NEXT
-    fn init_negated_src_operands(&mut self, src_operands: Vec<Signal>, network: &impl NetworkWithBackwardEdges<Node = Aoig>) -> Vec<Instruction> {
-        let mut instructions = vec!();
-        let mut negated_inputs: HashSet<Signal> = HashSet::new(); // inputs which are required in their negated form
-        let negated_src_operands: Vec<Signal> = src_operands.iter()
-            .filter(|sig| sig.is_inverted())
-            .copied() // map ref to owned val
-            .collect();
-        negated_inputs.extend(negated_src_operands.iter());
-
-        for neg_in in negated_inputs {
-            if self.comp_state.value_states.contains_key(&neg_in) {
-                // negated signal is already available
-                continue;
-            } else {
-                // else make negated-signal available
-                let unnegated_signal = neg_in.invert();
-                let origin_unneg_row= self.comp_state.value_states.get(&unnegated_signal).expect("Original version of this value is not available??")
-                    .row_location.expect("Original version of this value is not live??");
-                let dst_row = self.get_next_free_safespace_row(None);
-
-                // TODO: negate val and move value in selected safe-space row
-                let selected_sra = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&SupportedNrOperands::try_from(1).unwrap()).unwrap().iter().find(|row| ! self.safe_space_rows.contains(&row.0)) // just select the first available compute-row
-                    .expect("It's assumed that issuing APA(row,row) for same row activates only that row");
-                let origin_subarray_bitmask = origin_unneg_row & SUBARRAY_ID_BITMASK;
-                let comp_row = origin_subarray_bitmask | (ROW_ID_BITMASK & selected_sra.0);
-                let (_, ref_array) = self.select_compute_and_ref_subarray(vec!(comp_row));
-                let result_row = (ROW_ID_BITMASK & selected_sra.0) & ref_array;
-
-                let move_to_comp_row = Instruction::RowCloneFPM(origin_unneg_row, comp_row, String::from("Move row to safe space"));
-                let not = Instruction::ApaNOT(comp_row,  result_row);
-                let move_to_safespace= Instruction::RowCloneFPM(result_row, dst_row, String::from("Move row to safe space"));
-
-                instructions.push(move_to_comp_row);
-                instructions.push(not);
-                instructions.push(move_to_safespace);
-
-                self.comp_state.dram_state.insert(dst_row, RowState { is_compute_row: false, live_value: Some(neg_in), constant: None });
-                self.comp_state.value_states.insert(neg_in, ValueState { is_computed: true, row_location: Some(dst_row) });
-            }
-        }
-
-        instructions
-    }
 
     /// Return id of subarray to use for computation and reference (compute_subarrayid, reference_subarrayid)
     /// - based on location of input rows AND current compilation state
@@ -460,120 +492,93 @@ impl Compiler {
         (mostly_used_subarray_id, selected_ref_subarray)
     }
 
-    /// Return next free safe-space row
-    /// - use `preferred_subarray` if there is a specific subarray you would like to be that
-    /// safe-sapce row from. Else just the next free safe-space row will be chosen
-    ///     - NOTE: this is not guaranteed to be fulfilled !
-    fn get_next_free_safespace_row(&self, preferred_subarray: Option<SubarrayId>) -> RowAddress {
-
-        let subarray_order  =  if let Some(subarray) = preferred_subarray {
-            // start search with `preferred_subarray` if it's supplied
-            let mut first_half = (0..subarray).collect::<Vec<SubarrayId>>();
-            first_half.extend(subarray+1..NR_SUBARRAYS);
-            first_half
-            // subarray_original_order.filter(|x| *x != subarray).into_iter()
-        } else {
-            // else just iterate in natural order
-            (0..NR_SUBARRAYS).collect()
-        };
-
-        for subarray in subarray_order {
-            for row in &self.safe_space_rows {
-                let row_addr = row | subarrayid_to_subarray_address(subarray);
-                if self.comp_state.dram_state.get(&row_addr).unwrap_or(&RowState::default()).live_value.is_none() { // NOTE: safe-space rows are inserted lazily into `dram_state`
-                    return row_addr;
-                }
-            }
-        }
-        panic!("OOM: No more available safe-space rows");
-    }
-
     /// Returns Instructions to execute given `next_candidate`
     /// - [ ] make sure that operation to be executed on those rows won't simultaneously activate other rows holding valid data which will be used by future operations
     /// TODO: NEXT
     fn execute_next_instruction(&mut self, next_candidate: &Signal, network: &impl NetworkWithBackwardEdges<Node = Aoig>) -> Vec<Instruction> {
-        let mut next_instructions = vec!();
-
-        debug!("Executing candidate {:?}", next_candidate);
-        let src_operands: Vec<Signal> = network.node(next_candidate.node_id()).inputs().to_vec();
-        let mut init_neg_operands = self.init_negated_src_operands(src_operands.clone(), network); // TODO NEXT: make sure all required negated operands are available
-        next_instructions.append(&mut init_neg_operands);
-
-        let nr_operands = src_operands.len(); // use to select SRA to activate
-        let nr_rows = nr_operands.next_power_of_two();
-
-        let src_rows: Vec<RowAddress> = src_operands.iter()
-            .map(|src_operand| {
-
-                debug!("src: {src_operand:?}");
-                self.comp_state.value_states.get(src_operand)
-                    .unwrap()
-                    .row_location
-                    .expect("Sth went wrong... if the src-operand is not in a row, then this candidate shouldn't have been added to the list of candidates")
-            })
-            .collect();
-
-        let (compute_subarray, ref_subarray) = self.select_compute_and_ref_subarray(src_rows);
-        let language_op = network.node(next_candidate.node_id());
-
-        // TODO: extract NOT
-        let logic_op = match language_op {
-            // REMINDER: operand-nr is extracted by looking at nr of children beforehand
-            Aoig::And(_) | Aoig::And4(_) | Aoig::And8(_)| Aoig::And16(_) => LogicOp::AND,
-            Aoig::Or(_) | Aoig::Or4(_) | Aoig::Or8(_) | Aoig::Or16(_) => LogicOp::OR,
-            _ => panic!("candidate is expected to be a logic op"),
-        };
-
-        // 0. Select an SRA (=row-address tuple) for the selected subarray based on highest success-rate
-        // TODO (possible improvement): input replication by choosing SRA with more activated rows than operands and duplicating operands which are in far-away rows into several rows?)
-        let row_combi = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&SupportedNrOperands::try_from(nr_rows as u8).unwrap()).unwrap()
-            // sort by success-rate - using eg `BTreeMap` turned out to impose a too large runtime overhead
-            .iter()
-            .find(|combi| !self.blocked_row_combinations.contains(combi)) // choose first block RowAddr-combination
-            .expect("No SRA for nr-rows={nr_rows}");
-
-        let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(row_combi).unwrap();
-        let ref_rows: Vec<RowAddress> = activated_rows.iter()
-            .map(|row| row & (subarrayid_to_subarray_address(ref_subarray))) // make activated rows refer to the right subarray
-            .collect();
-        let comp_rows: Vec<RowAddress>  = activated_rows.iter()
-            .map(|row| row & (subarrayid_to_subarray_address(compute_subarray))) // make activated rows refer to the right subarray
-            .collect();
-
-
-        // 1. Initialize rows in ref-subarray (if executing AND/OR)
-        // - TODO: read nr of frac-ops to issue from compiler-settings
-        let mut instruction_init_ref_subarray  = self.init_reference_subarray(ref_rows.clone(), logic_op);
-        next_instructions.append(&mut instruction_init_ref_subarray);
-
-        // 2. Place rows in the simultaneously activated rows in the compute subarray (init other rows with 0 for OR, 1 for AND and same value for NOT)
-        let mut instructions_init_comp_subarray = self.init_compute_subarray( activated_rows.clone(), src_operands, logic_op, NeighboringSubarrayRelPosition::get_relative_position(compute_subarray, ref_subarray));
-        next_instructions.append(&mut instructions_init_comp_subarray);
-
-        // SKIPPED: 2.2 Check if issuing `APA(src1,src2)` would activate other rows which hold valid data
-        // - only necessary once we find optimization to not write values to safe-space but reuse them diectly
-        // 2.2.1 if yes: move data to other rows for performing this op
-
-        // 3. Issue actual operation
-        let mut actual_op = match logic_op {
-            LogicOp::NOT => vec!(Instruction::ApaNOT(row_combi.0, row_combi.1)),
-            LogicOp::AND | LogicOp::OR => vec!(Instruction::ApaAndOr(row_combi.0, row_combi.1)),
-            LogicOp::NAND | LogicOp::NOR => vec!(Instruction::ApaAndOr(row_combi.0, row_combi.1), Instruction::ApaNOT(row_combi.0, row_combi.1)), // TODO: or the othyer way around (1st NOT)?
-        };
-
-        next_instructions.append(&mut actual_op);
-        for (&comp_row, &ref_row) in comp_rows.iter().zip(ref_rows.iter()) {
-            self.comp_state.dram_state.insert(comp_row, RowState { is_compute_row: true, live_value: Some(*next_candidate), constant: None });
-            self.comp_state.value_states.insert(*next_candidate, ValueState { is_computed: true, row_location: Some(comp_row) });
-            // ref subarray holds negated value afterwarsd
-            self.comp_state.dram_state.insert(ref_row, RowState { is_compute_row: true, live_value: Some(next_candidate.invert()), constant: None });
-            self.comp_state.value_states.insert(next_candidate.invert(), ValueState { is_computed: true, row_location: Some(ref_row) });
-        }
-
-        // 4. Copy result data from dst NEAREST to the sense-amps into a safe-space row and update `value_state`
-        // TODO LAST: possible improvement - error correction over all dst-rows (eg majority-vote for each bit, votes weighted by distance to sense-amps?)
-
-        next_instructions
+        todo!();
+        // let mut next_instructions = vec!();
+        //
+        // debug!("Executing candidate {:?}", next_candidate);
+        // let src_operands: Vec<Signal> = network.node(next_candidate.node_id()).inputs().to_vec();
+        // let mut init_neg_operands = self.init_negated_src_operands(src_operands.clone(), network); // TODO NEXT: make sure all required negated operands are available
+        // next_instructions.append(&mut init_neg_operands);
+        //
+        // let nr_operands = src_operands.len(); // use to select SRA to activate
+        // let nr_rows = nr_operands.next_power_of_two();
+        //
+        // let src_rows: Vec<RowAddress> = src_operands.iter()
+        //     .map(|src_operand| {
+        //
+        //         debug!("src: {src_operand:?}");
+        //         self.comp_state.value_states.get(src_operand)
+        //             .unwrap()
+        //             .row_location
+        //             .expect("Sth went wrong... if the src-operand is not in a row, then this candidate shouldn't have been added to the list of candidates")
+        //     })
+        //     .collect();
+        //
+        // let (compute_subarray, ref_subarray) = self.select_compute_and_ref_subarray(src_rows);
+        // let language_op = network.node(next_candidate.node_id());
+        //
+        // // TODO: extract NOT
+        // let logic_op = match language_op {
+        //     // REMINDER: operand-nr is extracted by looking at nr of children beforehand
+        //     Aoig::And(_) | Aoig::And4(_) | Aoig::And8(_)| Aoig::And16(_) => LogicOp::AND,
+        //     Aoig::Or(_) | Aoig::Or4(_) | Aoig::Or8(_) | Aoig::Or16(_) => LogicOp::OR,
+        //     _ => panic!("candidate is expected to be a logic op"),
+        // };
+        //
+        // // 0. Select an SRA (=row-address tuple) for the selected subarray based on highest success-rate
+        // // TODO (possible improvement): input replication by choosing SRA with more activated rows than operands and duplicating operands which are in far-away rows into several rows?)
+        // let row_combi = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&SupportedNrOperands::try_from(nr_rows as u8).unwrap()).unwrap()
+        //     // sort by success-rate - using eg `BTreeMap` turned out to impose a too large runtime overhead
+        //     .iter()
+        //     .find(|combi| !self.blocked_row_combinations.contains(combi)) // choose first block RowAddr-combination
+        //     .expect("No SRA for nr-rows={nr_rows}");
+        //
+        // let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(row_combi).unwrap();
+        // let ref_rows: Vec<RowAddress> = activated_rows.iter()
+        //     .map(|row| row & (subarrayid_to_subarray_address(ref_subarray))) // make activated rows refer to the right subarray
+        //     .collect();
+        // let comp_rows: Vec<RowAddress>  = activated_rows.iter()
+        //     .map(|row| row & (subarrayid_to_subarray_address(compute_subarray))) // make activated rows refer to the right subarray
+        //     .collect();
+        //
+        //
+        // // 1. Initialize rows in ref-subarray (if executing AND/OR)
+        // // - TODO: read nr of frac-ops to issue from compiler-settings
+        // let mut instruction_init_ref_subarray  = self.init_reference_subarray(ref_rows.clone(), logic_op);
+        // next_instructions.append(&mut instruction_init_ref_subarray);
+        //
+        // // 2. Place rows in the simultaneously activated rows in the compute subarray (init other rows with 0 for OR, 1 for AND and same value for NOT)
+        // let mut instructions_init_comp_subarray = self.init_compute_subarray( activated_rows.clone(), src_operands, logic_op, NeighboringSubarrayRelPosition::get_relative_position(compute_subarray, ref_subarray));
+        // next_instructions.append(&mut instructions_init_comp_subarray);
+        //
+        // // SKIPPED: 2.2 Check if issuing `APA(src1,src2)` would activate other rows which hold valid data
+        // // - only necessary once we find optimization to not write values to safe-space but reuse them diectly
+        // // 2.2.1 if yes: move data to other rows for performing this op
+        //
+        // // 3. Issue actual operation
+        // let mut actual_op = match logic_op {
+        //     LogicOp::NOT => vec!(Instruction::ApaNOT(row_combi.0, row_combi.1)),
+        //     LogicOp::AND | LogicOp::OR => vec!(Instruction::ApaAndOr(row_combi.0, row_combi.1)),
+        //     LogicOp::NAND | LogicOp::NOR => vec!(Instruction::ApaAndOr(row_combi.0, row_combi.1), Instruction::ApaNOT(row_combi.0, row_combi.1)), // TODO: or the othyer way around (1st NOT)?
+        // };
+        //
+        // next_instructions.append(&mut actual_op);
+        // for (&comp_row, &ref_row) in comp_rows.iter().zip(ref_rows.iter()) {
+        //     self.comp_state.dram_state.insert(comp_row, RowState { is_compute_row: true, live_value: Some(*next_candidate), constant: None });
+        //     self.comp_state.value_states.insert(*next_candidate, ValueState { is_computed: true, row_location: Some(comp_row) });
+        //     // ref subarray holds negated value afterwarsd
+        //     self.comp_state.dram_state.insert(ref_row, RowState { is_compute_row: true, live_value: Some(next_candidate.invert()), constant: None });
+        //     self.comp_state.value_states.insert(next_candidate.invert(), ValueState { is_computed: true, row_location: Some(ref_row) });
+        // }
+        //
+        // // 4. Copy result data from dst NEAREST to the sense-amps into a safe-space row and update `value_state`
+        // // TODO LAST: possible improvement - error correction over all dst-rows (eg majority-vote for each bit, votes weighted by distance to sense-amps?)
+        //
+        // next_instructions
     }
 
     /// Compute `SchedulingPrio` for a given node
@@ -737,16 +742,6 @@ mod tests {
             env_logger::init();
         });
         Compiler::new(CompilerSettings { print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, repetition_fracops: 5, safe_space_rows_per_subarray: 16, config_file: CString::new("").expect("CString::new failed").as_ptr(), do_save_config: true} )
-    }
-
-    #[test]
-    fn test_alloc_safe_space_rows() {
-        let mut compiler = init();
-        const REQUESTED_SAFE_SPACE_ROWS: u8 = 8;
-        compiler.alloc_safe_space_rows(REQUESTED_SAFE_SPACE_ROWS);
-
-        debug!("{:?}", compiler.safe_space_rows);
-        assert_eq!(compiler.safe_space_rows.iter().dedup().collect::<Vec<&RowAddress>>().len(), REQUESTED_SAFE_SPACE_ROWS as usize);
     }
 
     #[test]
