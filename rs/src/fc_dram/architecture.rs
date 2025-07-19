@@ -19,10 +19,6 @@ pub fn subarrayid_to_subarray_address(subarray_id: SubarrayId) -> RowAddress {
     RowAddress(subarray_id << ROWS_PER_SUBARRAY.ilog2()) // lower bits=rows in subarray
 }
 
-pub fn get_subarrayid_from_rowaddr(row: u64) -> SubarrayId {
-    (row & SUBARRAY_ID_BITMASK) >> ROWS_PER_SUBARRAY.ilog2()
-}
-
 /// All Subarrays (except the ones at the edges) have two neighboring subarrays: one below (subarray_id+1) and one above (subarray_id-1)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub enum NeighboringSubarrayRelPosition {
@@ -166,7 +162,6 @@ pub type SubarrayId = u64;
 
 impl RowAddress {
     /// Return subarray-id the row lies in
-    /// TODO: ship logic from `get_subarrayid_from_rowaddr()` into this function
     pub fn get_subarray_id(&self) -> SubarrayId {
         (self.0 & SUBARRAY_ID_BITMASK) >> ROWS_PER_SUBARRAY.ilog2()
     }

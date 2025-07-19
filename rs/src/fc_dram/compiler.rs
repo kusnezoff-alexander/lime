@@ -69,19 +69,19 @@ impl Compiler {
         let mut program = Program::new(vec!());
 
         // debug!("Compiling {:?}", network);
-        // 0. Prepare compilation: select safe-space rows, place inputs into DRAM module (and store where inputs have been placed in `program`)
+        // 0. Prepare compilation:
+        // - select safe-space rows
+        // - place inputs&constants into DRAM module (and store where inputs have been placed in `program`)
+        // - initialize candidates (with which to start execution)
         self.init_comp_state(network, &mut program);
 
-        // start with inputs
-        let primary_inputs = network.leaves();
-        debug!("Primary inputs: {:?}", primary_inputs.collect::<Vec<Id>>());
-
         // println!("{:?}", network.outputs().collect::<Vec<Signal>>());
-        debug!("Nodes in network:");
-        for node in network.iter() {
-            debug!("{:?},", node);
-        }
+        // debug!("Nodes in network:");
+        // for node in network.iter() {
+        //     debug!("{:?},", node);
+        // }
 
+        todo!("NEXT");
         // 1. Actual compilation
         while let Some((next_candidate, _)) = self.comp_state.candidates.pop() {
                 // TODO: extend program with instr that is executed next
@@ -319,11 +319,10 @@ impl Compiler {
 
         self.place_inputs(network, program); // place input-operands into rows
         debug!("Placed inputs {:?} in {:?}", network.leaves().collect::<Vec<Id>>(), self.comp_state.value_states);
-        todo!("NEXT");
 
         // 0.5 Setup: store all network-nodes yet to be compiled
         self.init_candidates(network);
-
+        debug!("Initialized candidates {:?}", self.comp_state.candidates);
     }
 
     /// Assigns signals to subarrays and through this determines placement of those signal in the DRAM module

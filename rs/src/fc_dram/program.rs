@@ -2,7 +2,7 @@
 //! compiling given logic-network (see [`compilation`]) and potentially adding some manual
 //! optimizations ([`optimization`])
 use super::architecture::RowAddress;
-use crate::fc_dram::architecture::{get_subarrayid_from_rowaddr, Instruction, ROW_ID_BITMASK};
+use crate::fc_dram::architecture::{Instruction, ROW_ID_BITMASK};
 use eggmock::Signal;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -11,6 +11,9 @@ use std::fmt::{Display, Formatter};
 #[derive(Debug, Clone)]
 pub struct Program {
     pub instructions: Vec<Instruction>,
+    /// Specifies in which rows constants have to be placed (!have to be placed in EVERY subarray)
+    /// - TODO: adjust this to only place in subarrays which are actually used as reference subarrays during program execution
+    pub constants_row_placement: HashMap<Signal, Vec<RowAddress>>,
     /// Specifies where row-operands should be placed prior to calling this program
     /// (This is a convention which tells the user of this lib where the data should be placed within the DRAM before executing this program)
     /// - NOTE: Signals might have to be placed in several subarrays (REMINDER: movement in btw subarrays is not supported by FCDRAM)
@@ -23,6 +26,7 @@ impl Program {
     pub fn new(instructions: Vec<Instruction>) -> Self {
         Self {
             instructions,
+            constants_row_placement: HashMap::new(),
             input_row_operands_placement: HashMap::new(),
             output_row_operands_placement: HashMap::new(),
         }
