@@ -81,7 +81,6 @@ impl Compiler {
         //     debug!("{:?},", node);
         // }
 
-        todo!("NEXT");
         // 1. Actual compilation
         while let Some((next_candidate, _)) = self.comp_state.candidates.pop() {
                 // TODO: extend program with instr that is executed next
@@ -208,6 +207,7 @@ impl Compiler {
 
     /// Initialize candidates with all nodes that are computable
     fn init_candidates(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>) {
+        todo!("NEXT");
         let inputs: Vec<Id> = network.leaves().collect();
 
         // init candidates with all nodes having only inputs as src-operands
@@ -479,34 +479,50 @@ impl Compiler {
         instructions
     }
 
+    /// Returns instructions to be executed for performing `NOT` on `src_row` into `dst_row`
+    /// - NOTE: currenlty only single-operand NOTs are supported bc
+    ///     1) more operands lead to (slightly) worse results (see Figure10 in [1])
+    ///     2) since there are separate compute rows using multiple dst rows doesn't make sense (the values need to be copied out of the dst-rows anyway into non-compute rows)
+    fn execute_not(&self, signal_to_invert: &Signal) -> Vec<Instruction> {
+        let row_combi = self.compute_row_activations.get(&(SupportedNrOperands::One, NeighboringSubarrayRelPosition::Above)).unwrap();
+        // perform `NOT`
 
-    /// Return id of subarray to use for computation and reference (compute_subarrayid, reference_subarrayid)
-    /// - based on location of input rows AND current compilation state
-    /// - [ ] POSSIBLE EXTENSION: include lookahead for future ops and their inputs they depend on
-    ///
-    /// TODO: NEXT
-    fn select_compute_and_ref_subarray(&self, input_rows: Vec<RowAddress>) -> (SubarrayId, SubarrayId) {
-        // naive implementation: just use the subarray that most of the `input_rows` reside in
-        // TODO: find better solution
-        let used_subarray_ids = input_rows.into_iter().map(|row| row.0 & SUBARRAY_ID_BITMASK);
-        let (&mostly_used_subarray_id, _) = used_subarray_ids
-                .fold(HashMap::new(), |mut acc, item| {
-                            *acc.entry(item).or_insert(0) += 1;
-                            acc
-                        })
-                .iter().max_by_key(|&(_, count)| count).unwrap();
+        let row_combi_correct_subarray = todo!(); // REMINDER: rows returned `compute_row_activations` are not yet adjusted for the right subarray
+    }
 
-        let selected_ref_subarray = (mostly_used_subarray_id+1) % NR_SUBARRAYS; // TODO: use 2D-layout of subarrays to determine which of them share sense-amps
+    /// Returns the instructions needed to perform `language_op`
+    fn execute_and_or(&self, language_op: Aoig) -> Vec<Instruction> {
+        let logic_op = match language_op {
+            // REMINDER: operand-nr is extracted by looking at nr of children beforehand
+            Aoig::And(_) | Aoig::And4(_) | Aoig::And8(_)| Aoig::And16(_) => LogicOp::AND,
+            Aoig::Or(_) | Aoig::Or4(_) | Aoig::Or8(_) | Aoig::Or16(_) => LogicOp::OR,
+            _ => panic!("candidate is expected to be a logic op"),
+        };
 
-        (mostly_used_subarray_id, selected_ref_subarray)
+        todo!();
     }
 
     /// Returns Instructions to execute given `next_candidate`
     /// - [ ] make sure that operation to be executed on those rows won't simultaneously activate other rows holding valid data which will be used by future operations
+    ///
     /// TODO: NEXT
     fn execute_next_instruction(&mut self, next_candidate: &Signal, network: &impl NetworkWithBackwardEdges<Node = Aoig>) -> Vec<Instruction> {
+        let node_id = next_candidate.node_id();
+        assert!(network.node(node_id).inputs().iter().all(|input| {
+            self.signal_to_subarrayids.get(input).unwrap() == self.signal_to_subarrayids.get(&Signal::new(node_id, false))
+        }));
+
+        let mut next_instructions = vec!();
+        // 1. Perform actual operation of the node
+        let language_op = network.node(node_id);
+        next_instructions.append(&mut self.execute_and_or(language_op));
+        // 2. Negate the result (if needed)
+        if next_candidate.is_inverted() {
+            let mut negate_instructions = self.execute_not(next_candidate);
+            next_instructions.append(&mut negate_instructions);
+        }
         todo!();
-        // let mut next_instructions = vec!();
+
         //
         // debug!("Executing candidate {:?}", next_candidate);
         // let src_operands: Vec<Signal> = network.node(next_candidate.node_id()).inputs().to_vec();
