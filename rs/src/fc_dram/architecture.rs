@@ -5,7 +5,7 @@
 //!
 //! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of RowAddress
 
-use std::{cmp::Ordering, collections::{HashMap, HashSet}, fmt::{Display, Formatter}, ops, sync::LazyLock};
+use std::{cmp::Ordering, collections::{HashMap, HashSet}, fmt::{self, Display, Formatter}, ops, sync::LazyLock};
 use log::debug;
 use strum_macros::EnumIter;
 
@@ -16,11 +16,11 @@ pub const ROW_ID_BITMASK: u64 = 0b0_000_000_111_111_111; // 7 highest bits=subar
 
 // some utility functions
 pub fn subarrayid_to_subarray_address(subarray_id: SubarrayId) -> RowAddress {
-    subarray_id << ROWS_PER_SUBARRAY.ilog2() // lower bits=rows in subarray
+    RowAddress(subarray_id << ROWS_PER_SUBARRAY.ilog2()) // lower bits=rows in subarray
 }
 
-pub fn get_subarrayid_from_rowaddr(row: RowAddress) -> SubarrayId {
-    (row & SUBARRAY_ID_BITMASK) >> NR_SUBARRAYS.ilog2()
+pub fn get_subarrayid_from_rowaddr(row: u64) -> SubarrayId {
+    (row & SUBARRAY_ID_BITMASK) >> ROWS_PER_SUBARRAY.ilog2()
 }
 
 /// All Subarrays (except the ones at the edges) have two neighboring subarrays: one below (subarray_id+1) and one above (subarray_id-1)
@@ -75,11 +75,11 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
         // for each predecoder store which bits will remain set due to `APA(row1,row)`:
         let overlapping_bits = [
             // latches set by `ACT(row1)`  --- latches set by `ACT(row2)`
-            [ row1 & predecoder_bitmasks[0], row2 & predecoder_bitmasks[0]],
-            [ row1 & predecoder_bitmasks[1], row2 & predecoder_bitmasks[1]],
-            [ row1 & predecoder_bitmasks[2], row2 & predecoder_bitmasks[2]],
-            [ row1 & predecoder_bitmasks[3], row2 & predecoder_bitmasks[3]],
-            [ row1 & predecoder_bitmasks[4], row2 & predecoder_bitmasks[4]],
+            [ row1.0 & predecoder_bitmasks[0], row2.0 & predecoder_bitmasks[0]],
+            [ row1.0 & predecoder_bitmasks[1], row2.0 & predecoder_bitmasks[1]],
+            [ row1.0 & predecoder_bitmasks[2], row2.0 & predecoder_bitmasks[2]],
+            [ row1.0 & predecoder_bitmasks[3], row2.0 & predecoder_bitmasks[3]],
+            [ row1.0 & predecoder_bitmasks[4], row2.0 & predecoder_bitmasks[4]],
         ];
 
         let mut activated_rows  = vec!();       // TODO: get other activated rows and add them to `activated_rows`
@@ -87,9 +87,9 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
         for i in 0..1 << predecoder_bitmasks.len() {
             let activated_row = overlapping_bits.iter()
                 // start with all row-address bits unset (=0) and first predecoder stage (=1)
-                .fold((0 as RowAddress, 1), |(row, predecoder_stage_onehot), new_row_bits|{
+                .fold((RowAddress(0), 1), |(row, predecoder_stage_onehot), new_row_bits|{
                     let bitmask_to_choose = (i & predecoder_stage_onehot) > 0;
-                    (row | new_row_bits[bitmask_to_choose as usize], predecoder_stage_onehot << 1)
+                    (RowAddress(row.0 | new_row_bits[bitmask_to_choose as usize]), predecoder_stage_onehot << 1)
                 });
             activated_rows.push(activated_row.0);
         }
@@ -104,15 +104,15 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
     // TODO: NEXT
     let get_distance_of_row_to_sense_amps = |row: RowAddress, subarray_rel_position: NeighboringSubarrayRelPosition| -> RowDistanceToSenseAmps {
         // NOTE: last & first subarrays only have sense-amps from one side
-        if (get_subarrayid_from_rowaddr(row) == NR_SUBARRAYS-1 && subarray_rel_position == NeighboringSubarrayRelPosition::Below) || (get_subarrayid_from_rowaddr(row) == 0 && subarray_rel_position == NeighboringSubarrayRelPosition::Above) {
+        if (row.get_subarray_id() == NR_SUBARRAYS-1 && subarray_rel_position == NeighboringSubarrayRelPosition::Below) || (row.get_subarray_id() == 0 && subarray_rel_position == NeighboringSubarrayRelPosition::Above) {
             panic!("Edge subarrays have sense-amps only connected from one side");
         }
 
-        let local_row_address= row & ROW_ID_BITMASK;
+        let local_row_address= RowAddress(row.0 & ROW_ID_BITMASK);
 
         let distance_to_above_subarray = match local_row_address {
-            i if i < ROWS_PER_SUBARRAY / 2 / 3 => RowDistanceToSenseAmps::Close,   // 1st third  of subarray-half
-            i if i < ROWS_PER_SUBARRAY / 2 / 6 => RowDistanceToSenseAmps::Middle,  // 2nd third  of subarray-half
+            i if i.0 < ROWS_PER_SUBARRAY / 2 / 3 => RowDistanceToSenseAmps::Close,   // 1st third  of subarray-half
+            i if i.0 < ROWS_PER_SUBARRAY / 2 / 6 => RowDistanceToSenseAmps::Middle,  // 2nd third  of subarray-half
             _ => RowDistanceToSenseAmps::Far,                                           // everything else is treated as being far away
         };
 
@@ -125,16 +125,16 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
     // precompute things based on given SRA (simultaneous row activation function)
     let mut precomputed_simultaneous_row_activations = HashMap::new();
     for i in 0..ROWS_PER_SUBARRAY {
-        precomputed_simultaneous_row_activations.insert((i,i), vec!(i)); // special case: no other row is activated when executing `APA(r1,r1)`
+        precomputed_simultaneous_row_activations.insert((RowAddress(i),RowAddress(i)), vec!(RowAddress(i))); // special case: no other row is activated when executing `APA(r1,r1)`
         for j in i+1..ROWS_PER_SUBARRAY {
-            let activated_rows = get_activated_rows_from_apa(i, j);
-            precomputed_simultaneous_row_activations.insert((i,j), activated_rows.clone());
-            precomputed_simultaneous_row_activations.insert((j,i), activated_rows.clone());
+            let activated_rows = get_activated_rows_from_apa(RowAddress(i), RowAddress(j));
+            precomputed_simultaneous_row_activations.insert((RowAddress(i),RowAddress(j)), activated_rows.clone());
+            precomputed_simultaneous_row_activations.insert((RowAddress(j),RowAddress(i)), activated_rows.clone());
 
             for row in activated_rows {
                 row_activated_by_rowaddress_tuple.entry(row)
                     .or_default()
-                    .insert((i,j));
+                    .insert((RowAddress(i),RowAddress(j)));
             }
         }
     }
@@ -160,8 +160,35 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
 });
 
 /// - ! must be smaller than `rows_per_subarray * nr_subarrays` (this is NOT checked!)
-pub type RowAddress = u64;
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub struct RowAddress(pub u64);
 pub type SubarrayId = u64;
+
+impl RowAddress {
+    /// Return subarray-id the row lies in
+    /// TODO: ship logic from `get_subarrayid_from_rowaddr()` into this function
+    pub fn get_subarray_id(&self) -> SubarrayId {
+        (self.0 & SUBARRAY_ID_BITMASK) >> ROWS_PER_SUBARRAY.ilog2()
+    }
+}
+
+impl fmt::Display for RowAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.get_subarray_id(), self.0 & ROW_ID_BITMASK)
+    }
+}
+
+impl fmt::Debug for RowAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.get_subarray_id(), self.0 & ROW_ID_BITMASK)
+    }
+}
+
+impl From<u64> for RowAddress {
+    fn from(value: u64) -> Self {
+        RowAddress(value)
+    }
+}
 
 // impl Display for Vec<RowAddress> {
 //     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -287,9 +314,9 @@ impl FCDRAMArchitecture {
     /// subarray adjacent to the compute subarray (!this is not checked but assumed to be true!)
     pub fn get_instructions_implementation_of_logic_ops(logic_op: LogicOp) -> Vec<Instruction> {
         match logic_op {
-            LogicOp::NOT => vec!(Instruction::ApaNOT(0, 0)),
-            LogicOp::AND => vec!(Instruction::FracOp(0), Instruction::ApaNOT(0, 0)),
-            LogicOp::OR => vec!(Instruction::FracOp(0), Instruction::ApaNOT(0, 0)),
+            LogicOp::NOT => vec!(Instruction::ApaNOT(RowAddress(0), RowAddress(0))),
+            LogicOp::AND => vec!(Instruction::FracOp(RowAddress(0)), Instruction::ApaNOT(RowAddress(0), RowAddress(0))),
+            LogicOp::OR => vec!(Instruction::FracOp(RowAddress(0)), Instruction::ApaNOT(RowAddress(0), RowAddress(0))),
             LogicOp::NAND => {
                 // 1. AND, 2. NOT
                 FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::AND)
@@ -376,19 +403,19 @@ pub enum Instruction {
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let display_row = |row| { format!("{}.{}", get_subarrayid_from_rowaddr(row), row & ROW_ID_BITMASK)}; // display subarray separately
+        let display_row = |row: &RowAddress| { format!("{}.{}", row.get_subarray_id(), row.0 & ROW_ID_BITMASK)}; // display subarray separately
         // TODO: change string-representation to display subarray-id
         let description = match self {
-            Instruction::FracOp(row) => format!("AP({})", display_row(*row)),
-            Instruction::ApaNOT(row1,row2) => format!("APA_NOT({},{})", display_row(*row1), display_row(*row2)),
-            Instruction::ApaAndOr(row1,row2) => format!("APA_AND_OR({},{}) // activates {:?}", display_row(*row1), display_row(*row2), ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(*row1,*row2))),
-            Instruction::RowCloneFPM(row1, row2, comment) => format!("AA({},{}) // {}", display_row(*row1), display_row(*row2), comment),
+            Instruction::FracOp(row) => format!("AP({})", display_row(row)),
+            Instruction::ApaNOT(row1,row2) => format!("APA_NOT({},{})", display_row(row1), display_row(row2)),
+            Instruction::ApaAndOr(row1,row2) => format!("APA_AND_OR({},{}) // activates {:?}", display_row(row1), display_row(row2), ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(*row1,*row2))),
+            Instruction::RowCloneFPM(row1, row2, comment) => format!("AA({},{}) // {}", display_row(row1), display_row(row2), comment),
             Instruction::RowClonePSM(row1, row2) => format!("
                 TRANSFER(<this_bank>{},<other_bank>(rowX))
                 TANSFER(<other_bank>rowX,<this_bank>{})
                 ",
-                display_row(*row1),
-                display_row(*row2)
+                display_row(row1),
+                display_row(row2)
         )};
         write!(f, "{}", description)
     }
@@ -434,11 +461,11 @@ impl Instruction {
                     (4, 94.94),
                     (8, 95.85),
                     (16, 95.87),
-                    (32, 0.00) // no value in paper ://
+                    (32, 0.000) // no value in paper ://
                 ]);
                 // nr_operand_success_rate.get(&nr_operands);
 
-                let (src_array, dst_array) = (get_subarrayid_from_rowaddr(*src), get_subarrayid_from_rowaddr(*dst));
+                let (src_array, dst_array) = (src.get_subarray_id(), dst.get_subarray_id());
                 let furthest_src_row = activated_rows.iter()
                     .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, NeighboringSubarrayRelPosition::get_relative_position(src_array, dst_array))) // RowDistanceToSenseAmps::Far; // TODO: get this
                     .max()

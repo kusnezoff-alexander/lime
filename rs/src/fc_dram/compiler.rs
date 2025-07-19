@@ -132,8 +132,8 @@ impl Compiler {
                         activated_rows.iter().map(|&row| {
                             // move subarray to 1st subarray (instead of 0th, which is at the edge and hence has no sense-amps above)
                             let subarray1_id = ((ROW_ID_BITMASK << 1) | 1) ^ ROW_ID_BITMASK;
-                            let row =  subarray1_id | row; // makes sure that `get_distance_of_row_to_sense_amps` doesn't panic since SRA returns subarray=0 by default (which is an edge subarray)
-                            println!("{row:b}");
+                            let row =  RowAddress(subarray1_id | row.0); // makes sure that `get_distance_of_row_to_sense_amps` doesn't panic since SRA returns subarray=0 by default (which is an edge subarray)
+                            println!("{:b}", row.0);
                             (ARCHITECTURE.get_distance_of_row_to_sense_amps)(row, sense_amp_position) as u64
                         }).sum()
                     };
@@ -142,8 +142,8 @@ impl Compiler {
                         let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(&best_row_combi).unwrap();
                         activated_rows.iter().map(|&row| {
                             let subarray1_id = ((ROW_ID_BITMASK << 1) | 1) ^ ROW_ID_BITMASK;
-                            let row =  subarray1_id | row; // makes sure that `get_distance_of_row_to_sense_amps` doesn't panic since SRA returns subarray=0 by default (which is an edge subarray)
-                            println!("{row:b}");
+                            let row =  RowAddress(subarray1_id | row.0); // makes sure that `get_distance_of_row_to_sense_amps` doesn't panic since SRA returns subarray=0 by default (which is an edge subarray)
+                            println!("{:b}", row.0);
                             (ARCHITECTURE.get_distance_of_row_to_sense_amps)(row, sense_amp_position) as u64
                         }).sum()
                     };
@@ -200,7 +200,7 @@ impl Compiler {
                     let next_free_row = self.comp_state.free_rows_per_subarray.get_mut(subarray).and_then(|v| v.pop()).expect("OOM: No more free rows in subarray {subarray} for placing inputs");
                     self.comp_state.value_states.insert(inverted_signal, ValueState { is_computed: true, row_location: Some(next_free_row) });
 
-                    program.input_row_operands_placement.entry(original_signal).or_default().push(next_free_row);
+                    program.input_row_operands_placement.entry(inverted_signal).or_default().push(next_free_row);
                 }
             }
         }
@@ -268,18 +268,18 @@ impl Compiler {
 
             // TODO: read&write this to&from config-file (added manually here in the meantiem)
             self.compute_row_activations = HashMap::from([
-                ((SupportedNrOperands::One, NeighboringSubarrayRelPosition::Above), (8, 8)),
-                ((SupportedNrOperands::One, NeighboringSubarrayRelPosition::Below), (303, 303)),
-                ((SupportedNrOperands::Two, NeighboringSubarrayRelPosition::Above), (15, 79)),
-                ((SupportedNrOperands::Two, NeighboringSubarrayRelPosition::Below), (293, 357)),
-                ((SupportedNrOperands::Four, NeighboringSubarrayRelPosition::Above), (60, 42)),
-                ((SupportedNrOperands::Four, NeighboringSubarrayRelPosition::Below), (472, 412)),
-                ((SupportedNrOperands::Eight, NeighboringSubarrayRelPosition::Above), (42, 15)),
-                ((SupportedNrOperands::Eight, NeighboringSubarrayRelPosition::Below), (203, 283)),
-                ((SupportedNrOperands::Sixteen, NeighboringSubarrayRelPosition::Above), (32, 83)),
-                ((SupportedNrOperands::Sixteen, NeighboringSubarrayRelPosition::Below), (470, 252)),
-                ((SupportedNrOperands::Thirtytwo, NeighboringSubarrayRelPosition::Above), (307, 28)),
-                ((SupportedNrOperands::Thirtytwo, NeighboringSubarrayRelPosition::Below), (149, 318)),
+                ((SupportedNrOperands::One, NeighboringSubarrayRelPosition::Above), (RowAddress(8), RowAddress(8))),
+                ((SupportedNrOperands::One, NeighboringSubarrayRelPosition::Below), (RowAddress(303), RowAddress(303))),
+                ((SupportedNrOperands::Two, NeighboringSubarrayRelPosition::Above), (RowAddress(15), RowAddress(79))),
+                ((SupportedNrOperands::Two, NeighboringSubarrayRelPosition::Below), (RowAddress(293), RowAddress(357))),
+                ((SupportedNrOperands::Four, NeighboringSubarrayRelPosition::Above), (RowAddress(60), RowAddress(42))),
+                ((SupportedNrOperands::Four, NeighboringSubarrayRelPosition::Below), (RowAddress(472), RowAddress(412))),
+                ((SupportedNrOperands::Eight, NeighboringSubarrayRelPosition::Above), (RowAddress(42), RowAddress(15))),
+                ((SupportedNrOperands::Eight, NeighboringSubarrayRelPosition::Below), (RowAddress(203), RowAddress(283))),
+                ((SupportedNrOperands::Sixteen, NeighboringSubarrayRelPosition::Above), (RowAddress(32), RowAddress(83))),
+                ((SupportedNrOperands::Sixteen, NeighboringSubarrayRelPosition::Below), (RowAddress(470), RowAddress(252))),
+                ((SupportedNrOperands::Thirtytwo, NeighboringSubarrayRelPosition::Above), (RowAddress(307), RowAddress(28))),
+                ((SupportedNrOperands::Thirtytwo, NeighboringSubarrayRelPosition::Below), (RowAddress(149), RowAddress(318))),
             ]);
 
 
@@ -303,10 +303,10 @@ impl Compiler {
             let new_compute_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(next_compute_row_combi).expect("Compute row cant be activated??");
             all_compute_rows.iter().chain(new_compute_rows).cloned().collect()
         });
-        let mut free_rows = (0..ROWS_PER_SUBARRAY).collect::<Vec<RowAddress>>();
+        let mut free_rows = (0..ROWS_PER_SUBARRAY).map(RowAddress::from).collect::<Vec<RowAddress>>();
         free_rows.retain(|r| {!compute_rows.contains(r)});
         for subarray in 0..NR_SUBARRAYS {
-            let free_rows_in_subarray = free_rows.iter().map(|row| row | subarrayid_to_subarray_address(subarray)).collect(); // transform local row address to row addresses in corresponding `subarray`
+            let free_rows_in_subarray = free_rows.iter().map(|row| RowAddress(row.0 | subarrayid_to_subarray_address(subarray).0)).collect(); // transform local row address to row addresses in corresponding `subarray`
             self.comp_state.free_rows_per_subarray.entry(subarray as SubarrayId).insert_entry(free_rows_in_subarray);
         }
 
@@ -471,7 +471,7 @@ impl Compiler {
 
             self.comp_state.dram_state.insert(row_addr, RowState { is_compute_row: true, live_value: Some(src_operand), constant: None });
 
-            if (src_operand_location & SUBARRAY_ID_BITMASK) == (row_addr & SUBARRAY_ID_BITMASK) {
+            if (src_operand_location.0 & SUBARRAY_ID_BITMASK) == (row_addr.0 & SUBARRAY_ID_BITMASK) {
                 instructions.push(Instruction::RowCloneFPM(src_operand_location, row_addr, String::from("Move operand to compute row")));
             } else {
                 instructions.push(Instruction::RowClonePSM(src_operand_location, row_addr)); // TODO: remove this, since it's not usable in COTS DRAMs
@@ -489,7 +489,7 @@ impl Compiler {
     fn select_compute_and_ref_subarray(&self, input_rows: Vec<RowAddress>) -> (SubarrayId, SubarrayId) {
         // naive implementation: just use the subarray that most of the `input_rows` reside in
         // TODO: find better solution
-        let used_subarray_ids = input_rows.into_iter().map(|row| row & SUBARRAY_ID_BITMASK);
+        let used_subarray_ids = input_rows.into_iter().map(|row| row.0 & SUBARRAY_ID_BITMASK);
         let (&mostly_used_subarray_id, _) = used_subarray_ids
                 .fold(HashMap::new(), |mut acc, item| {
                             *acc.entry(item).or_insert(0) += 1;
@@ -826,7 +826,7 @@ mod tests {
     #[test]
     fn test_select_compute_and_ref_subarray() {
         let compiler = init();
-        let (selected_subarray, _) = compiler.select_compute_and_ref_subarray(vec!(0b1_000_000_000, 0b1_000_010_000, 0b111_000_000_000, 0b10_100_000_000,));
+        let (selected_subarray, _) = compiler.select_compute_and_ref_subarray(vec!(RowAddress(0b1_000_000_000), RowAddress(0b1_000_010_000), RowAddress(0b111_000_000_000), RowAddress(0b10_100_000_000),));
         assert_eq!(selected_subarray, 0b1_000_000_000);
     }
 

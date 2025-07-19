@@ -32,14 +32,14 @@ impl Program {
 /// Print the generated program in human-readable form
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let display_row = |row| {
-            format!("{}.{}", get_subarrayid_from_rowaddr(row), row & ROW_ID_BITMASK)
+        let display_row = |row: &RowAddress| {
+            format!("{}.{}", row.get_subarray_id(), row.0 & ROW_ID_BITMASK)
         }; // display subarray separately
 
 
         let display_rows = |rows: Vec<RowAddress>| {
             let formatted: Vec<String> = rows.iter()
-                .map(|&row| format!("{}.{}", get_subarrayid_from_rowaddr(row), row & ROW_ID_BITMASK))
+                .map(|&row| format!("{}.{}", row.get_subarray_id(), row.0 & ROW_ID_BITMASK))
                 .collect();
 
             format!("[{}]", formatted.join(", "))
@@ -60,7 +60,7 @@ impl Display for Program {
         writeln!(f, "---------------------------------------")?;
         writeln!(f, "Output operand placement:")?;
         for (signal, row) in &self.output_row_operands_placement{
-            writeln!(f, "{:?} in {}", signal, display_row(*row))?;
+            writeln!(f, "{:?} in {}", signal, display_row(row))?;
         }
         writeln!(f, "---------------------------------------")?;
         Ok(())
