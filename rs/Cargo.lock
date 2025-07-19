@@ -210,6 +210,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
+name = "heck"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
 name = "indexmap"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -290,8 +296,12 @@ dependencies = [
  "itertools",
  "log",
  "ouroboros",
+ "priority-queue",
  "rustc-hash",
  "smallvec",
+ "strum",
+ "strum_macros",
+ "toml",
 ]
 
 [[package]]
@@ -357,7 +367,7 @@ version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c7028bdd3d43083f6d8d4d5187680d0d3560d54df4cc9d752005268b41e64d0"
 dependencies = [
- "heck",
+ "heck 0.4.1",
  "proc-macro2",
  "proc-macro2-diagnostics",
  "quote",
@@ -383,6 +393,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8a2f0d8d040d7848a709caf78912debcc3f33ee4b3cac47d73d1e1069e83507"
 dependencies = [
  "portable-atomic",
+]
+
+[[package]]
+name = "priority-queue"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5676d703dda103cbb035b653a9f11448c0a7216c7926bd35fcb5865475d0c970"
+dependencies = [
+ "autocfg",
+ "equivalent",
+ "indexmap",
 ]
 
 [[package]]
@@ -476,6 +497,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
 
 [[package]]
+name = "rustversion"
+version = "1.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
+
+[[package]]
 name = "saturating"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -508,6 +535,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40734c41988f7306bb04f0ecf60ec0f3f1caa34290e4e8ea471dcd3346483b83"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -518,6 +554,25 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "strum"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f64def088c51c9510a8579e3c5d67c65349dcf755e5479ad3d010aa6454e2c32"
+
+[[package]]
+name = "strum_macros"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c77a8c5abcaf0f9ce05d62342b7d298c346515365c36b673df4ebe3ced01fde8"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn",
+]
 
 [[package]]
 name = "symbol_table"
@@ -566,6 +621,45 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "toml"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0207d6ed1852c2a124c1fbec61621acb8330d2bf969a5d0643131e9affd985a5"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_parser",
+ "toml_writer",
+ "winnow",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bade1c3e902f58d73d3f294cd7f20391c1cb2fbcb643b73566bc773971df91e3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml_parser"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5c1c469eda89749d2230d8156a5969a69ffe0d6d01200581cdc6110674d293e"
+dependencies = [
+ "winnow",
+]
+
+[[package]]
+name = "toml_writer"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b679217f2848de74cabd3e8fc5e6d66f40b7da40f8e1954d92054d9010690fd5"
 
 [[package]]
 name = "unicode-ident"
@@ -752,6 +846,12 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "winnow"
+version = "0.7.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74c7b26e3480b707944fc872477815d29a8e429d2f93a1ce000f5fa84a15cbcd"
 
 [[package]]
 name = "yansi"

@@ -6,6 +6,8 @@
 //!
 //! - [`Compiler::compile()`] = main function - compiles given logic network for the given [`architecture`] into a [`program`] using some [`optimization`]
 
+use crate::fc_dram::architecture::ROWS_PER_SUBARRAY;
+
 use super::{
     architecture::{subarrayid_to_subarray_address, Instruction, LogicOp, NeighboringSubarrayRelPosition, SubarrayId, SupportedNrOperands, ARCHITECTURE, NR_SUBARRAYS, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
 };
@@ -35,6 +37,9 @@ pub struct Compiler {
 }
 
 impl Compiler {
+    /// Constants are repeated to fill complete row
+    const CONSTANTS: [usize; 2] = [0, 1];
+
     pub fn new(settings: CompilerSettings) -> Self {
         Compiler{
            settings,
@@ -63,6 +68,7 @@ impl Compiler {
     ) -> Program {
         let mut program = Program::new(vec!());
 
+        // debug!("Compiling {:?}", network);
         // 0. Prepare compilation: select safe-space rows, place inputs into DRAM module (and store where inputs have been placed in `program`)
         self.init_comp_state(network, &mut program);
 
@@ -157,40 +163,47 @@ impl Compiler {
     /// Places (commonly used) constants in safe-space rows
     /// - ! all safe-space rows are assumed to be empty when placing constants (constans are the first things to be placed into safe-space rows)
     /// - currently placed constants: all 0s and all 1s (for [`Compiler::init_reference_subarray`]
-    fn place_constants(&mut self) {
-        todo!();
+    /// - TODO: store placement of constants in `program`
+    fn place_constants(&mut self, program: &mut Program) {
         // place constants in EVERY subarray
-        // for subarray in 0..NR_SUBARRAYS {
-        //     let mut safe_space = self.safe_space_rows.iter();
-        //
-        //     let row_address_0 = subarrayid_to_subarray_address(subarray) | safe_space.next().unwrap();
-        //     self.comp_state.constant_values.insert(0, row_address_0);
-        //     let row_address_1 = subarrayid_to_subarray_address(subarray) | safe_space.next().unwrap();
-        //     self.comp_state.constant_values.insert(1, row_address_1);
-        //     // does it make sense to store any other constants in safe-space??
-        //
-        //     self.comp_state.dram_state.insert(row_address_0, RowState { is_compute_row: false, live_value: None, constant: Some(0)} );
-        //     self.comp_state.dram_state.insert(row_address_1, RowState { is_compute_row: false, live_value: None, constant: Some(1)} );
-        // }
+        for subarray in 0..NR_SUBARRAYS {
+            for constant in Self::CONSTANTS {
+                let next_free_row = self.comp_state.free_rows_per_subarray.get_mut(&subarray).and_then(|v| v.pop()).expect("No free rows in subarray {subarray} :(");
+                self.comp_state.constant_values.insert(constant, next_free_row);
+                self.comp_state.dram_state.insert(next_free_row, RowState { is_compute_row: false, live_value: None, constant: Some(constant)} );
+            }
+        }
     }
 
-    /// Place inputs onto appropriate rows
+    /// Place inputs onto appropriate rows, storing the decided placement into `program.input_row_operands_placement`
     /// - NOTE: constants are expected to be placed before the inputs
     /// TODO: algo which looks ahead which input-row-placement might be optimal (->reduce nr of move-ops to move intermediate results around & keep inputs close to sense-amps
     /// TODO: parititon logic network into subgraphs s.t. subgraphs can be mapped onto subarrays reducing nr of needed moves
-    fn place_inputs(&mut self, mut inputs: Vec<Id>) {
-        todo!();
-        // // naive implementation: start placing input on consecutive safe-space rows (continuing with next subarray once the current subarray has no more free safe-space rows)
-        // // TODO: change input operand placement to be more optimal (->taking into account future use of those operands)
-        // while let Some(next_input) = inputs.pop() {
-        //     // NOTE: some safe-space rows are reserved for constants
-        //     let free_safespace_row = self.get_next_free_safespace_row(None);
-        //
-        //     let initial_row_state = RowState { is_compute_row: false, live_value: Some(Signal::new(next_input, false)), constant: None };
-        //     let initial_value_state = ValueState { is_computed: true, row_location: Some(free_safespace_row) };
-        //     self.comp_state.dram_state.insert(free_safespace_row, initial_row_state);
-        //     self.comp_state.value_states.insert(Signal::new(next_input, false), initial_value_state);
-        // }
+    fn place_inputs(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>, program: &mut Program) {
+
+        for input in network.leaves().collect::<Vec<Id>>() {
+            // check whether the signal is required in inverted or noninverted form and place it accordingly
+            let original_signal = Signal::new(input, false);
+            let inverted_signal = Signal::new(input, true);
+
+            if let Some(original_input_locations) = self.signal_to_subarrayids.get(&original_signal) {
+                for subarray in original_input_locations {
+                    let next_free_row = self.comp_state.free_rows_per_subarray.get_mut(subarray).and_then(|v| v.pop()).expect("OOM: No more free rows in subarray {subarray} for placing inputs");
+                    self.comp_state.value_states.insert(original_signal, ValueState { is_computed: true, row_location: Some(next_free_row) });
+
+                    program.input_row_operands_placement.entry(original_signal).or_default().push(next_free_row);
+                }
+            }
+
+            if let Some(inverted_input_locations) = self.signal_to_subarrayids.get(&inverted_signal) {
+                for subarray in inverted_input_locations {
+                    let next_free_row = self.comp_state.free_rows_per_subarray.get_mut(subarray).and_then(|v| v.pop()).expect("OOM: No more free rows in subarray {subarray} for placing inputs");
+                    self.comp_state.value_states.insert(inverted_signal, ValueState { is_computed: true, row_location: Some(next_free_row) });
+
+                    program.input_row_operands_placement.entry(original_signal).or_default().push(next_free_row);
+                }
+            }
+        }
     }
 
     /// Initialize candidates with all nodes that are computable
@@ -228,7 +241,11 @@ impl Compiler {
             .collect()
     }
 
-    /// Initialize compilation state: choose compute rows (by setting [`Self::compute_row_activations`], assign subarray-ids to each NodeId, return code to place input operands in `program`
+    /// Initialize compilation state:
+    /// - choose compute rows (by setting [`Self::compute_row_activations`]
+    /// - assign subarray-ids to each NodeId
+    /// - initialize [`Self::comp_state::free_rows_per_subarray`] with the rows that are free to be used for placing constants, inputs and intermediate values (when execution has started)
+    /// - return code to place input operands in `program`
     fn init_comp_state(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>, program: &mut Program) {
         let config_file = unsafe { CStr::from_ptr(self.settings.config_file) }.to_str().unwrap();
         let config = Path::new(config_file);
@@ -267,12 +284,8 @@ impl Compiler {
 
 
         } else {
-
-            // debug!("Compiling {:?}", network);
-
             self.choose_compute_rows(); // choose which rows will serve as compute rows (those are stored in `self.compute_row_activations`
             println!("{:?}", self.compute_row_activations);
-            // self.place_constants();
 
             // TODO: write chosen compute rows to config-file
             // let safe_space_rows_toml = Value::Array(self.safe_space_rows.iter().map(
@@ -284,36 +297,33 @@ impl Compiler {
             // fs::write(config, config_in_toml.to_string()).expect("Sth went wrong here..");
         }
 
-        // NEXT: 0.2 Group operands by subarray (ensure all operands are placed in the right subarray)
+        // 0.2 Save free rows
+        // At the start all rows, except for the compute rows, are free rows
+        let compute_rows = self.compute_row_activations.values().fold(vec!(), |all_compute_rows, next_compute_row_combi| {
+            let new_compute_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(next_compute_row_combi).expect("Compute row cant be activated??");
+            all_compute_rows.iter().chain(new_compute_rows).cloned().collect()
+        });
+        let mut free_rows = (0..ROWS_PER_SUBARRAY).collect::<Vec<RowAddress>>();
+        free_rows.retain(|r| {!compute_rows.contains(r)});
+        for subarray in 0..NR_SUBARRAYS {
+            let free_rows_in_subarray = free_rows.iter().map(|row| row | subarrayid_to_subarray_address(subarray)).collect(); // transform local row address to row addresses in corresponding `subarray`
+            self.comp_state.free_rows_per_subarray.entry(subarray as SubarrayId).insert_entry(free_rows_in_subarray);
+        }
+
+        // 0.3 Group operands by subarray (ensure all operands are placed in the right subarray)
         self.assign_signals_to_subarrays(network); // sets `self.signal_to_subarrayids`
 
-        // 0.3 Place all constants and inputs and mark the inputs as being live
-        self.place_constants(); // constants are placed in <u>each</u> subarray
+        // NEXT: 0.4 Place all constants and inputs and mark the inputs as being live
+        self.place_constants(program); // constants are placed in <u>each</u> subarray
+        debug!("Placed constants: {:?}", self.comp_state.constant_values);
+
+        self.place_inputs(network, program); // place input-operands into rows
+        debug!("Placed inputs {:?} in {:?}", network.leaves().collect::<Vec<Id>>(), self.comp_state.value_states);
         todo!("NEXT");
 
-        self.place_inputs( network.leaves().collect::<Vec<Id>>() ); // place input-operands into rows
-        debug!("Placed inputs {:?} in {:?}", network.leaves().collect::<Vec<Id>>(), self.comp_state.value_states);
-        // 0.3 Setup: store all network-nodes yet to be compiled
+        // 0.5 Setup: store all network-nodes yet to be compiled
         self.init_candidates(network);
 
-        // store where inputs have been placed in program for user to know where to put them when calling into this program
-        program.input_row_operands_placement = network.leaves().collect::<Vec<Id>>()
-            .iter()
-            .flat_map(|&id| {
-                let mut locations = Vec::new();
-                let original_value = Signal::new(id, false);
-                let inverted_value = Signal::new(id, false); // inverted value might have also been placed on init
-                if let Some(value) = self.comp_state.value_states.get(&original_value) {
-                    locations.push((original_value, value.row_location.expect("Inputs are init directly into rows at the start")));
-                }
-
-                if let Some(value) = self.comp_state.value_states.get(&inverted_value) {
-                    locations.push((inverted_value, value.row_location.expect("Inputs are init directly into rows at the start")));
-                }
-
-                debug_assert_ne!(locations, vec!(), "Input {id:?} has not been placed at all");
-                locations
-            }).collect();
     }
 
     /// Assigns signals to subarrays and through this determines placement of those signal in the DRAM module
@@ -618,11 +628,11 @@ impl Compiler {
 /// Stores the current state of a row at a concrete compilations step
 #[derive(Default)] // by default not a compute_row, no live-value and no constant inside row
 pub struct RowState {
-    /// True iff that row is currently: 1) Not a safe-sapce row, 2) Doesn't activate any safe-sapce rows, 3) Isn't holding valid values in the role of a reference-subarray row
+    /// `compute_rows` are reservered rows which solely exist for performing computations, see [`Compiler::compute_row_activations`]
     is_compute_row: bool,
     /// `None` if the value inside this row is currently not live
     live_value: Option<Signal>,
-    /// Some rows (mostly only safe-space rows) store constants values, see [`CompilationState::constant_values`]
+    /// Mostly 0s/1s (for initializing reference subarray), see [`CompilationState::constant_values`]
     constant: Option<usize>,
 }
 
@@ -638,15 +648,18 @@ pub struct ValueState {
 
 /// Keep track of current progress of the compilation (eg which rows are used, into which rows data is placed, ...)
 pub struct CompilationState {
-    /// For each row in the dram-module store its state
+    /// For each row in the dram-module store its state (whether it's a compute row or if not whether/which value is stored inside it
     dram_state: HashMap<RowAddress, RowState>,
     /// Stores row in which an intermediate result (which is still to be used by future ops) is currently located (or whether it has been computed at all)
     value_states: HashMap<Signal, ValueState>,
-    /// Some constants are stored in fixed rows (!in each subarray), eg 0s and 1s for initializing reference subarray
+    /// Stores row location of constant
+    /// - REMINDER: some constants are stored in fixed rows (!in each subarray), eg 0s and 1s for initializing reference subarray
     constant_values: HashMap<usize, RowAddress>,
     /// List of candidates (ops ready to be issued) prioritized by some metric by which they are scheduled for execution
     /// - NOTE: calculate Nodes `SchedulingPrio` using
     candidates: PriorityQueue<Signal, SchedulingPrio>,
+    /// For each Subarray store which rows are free (and hence can be used for storing values)
+    free_rows_per_subarray: HashMap<SubarrayId, Vec<RowAddress>>,
 }
 
 impl CompilationState {
@@ -656,6 +669,7 @@ impl CompilationState {
             value_states: HashMap::new(),
             constant_values: HashMap::new(),
             candidates: PriorityQueue::new(),
+            free_rows_per_subarray: HashMap::new(),
         }
     }
 }

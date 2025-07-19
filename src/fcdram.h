@@ -3,6 +3,7 @@
 #include "eggmock.h"
 
 #include <cstdint>
+#include <string>
 
 extern "C"
 {
@@ -26,6 +27,8 @@ extern "C"
 	double min_success_rate;
     uint64_t repetition_fracops;
 	uint8_t safe_space_rows_per_subarray;
+	const char *config_file;
+	bool do_save_config;
   };
 
   eggmock::aig_receiver<eggmock::mig_rewrite> fcdram_rewriter( fcdram_compiler_settings settings );

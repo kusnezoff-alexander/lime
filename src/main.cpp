@@ -53,6 +53,8 @@ void run_fcdram_example()
 														   .min_success_rate= 99.9999,
     													   .repetition_fracops=5, // issue 5 FracOps per init of reference subarray
 														   .safe_space_rows_per_subarray = 16,
+														   .config_file = "/home/alex/Documents/Studium/Sem6/inf_pm_fpa/lime-fork/config/fcdram_hksynx.toml",
+														   .do_save_config = true,
                                                        } ) );
   // std::cout << "IC:" << result.instruction_count << std::endl;
   // std::cout << "t1:" << result.t_runner << std::endl;
