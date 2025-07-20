@@ -16,10 +16,11 @@ pub const ROW_ID_BITMASK: u64 = 0b0_000_000_111_111_111; // 7 highest bits=subar
 
 // some utility functions
 pub fn subarrayid_to_subarray_address(subarray_id: SubarrayId) -> RowAddress {
-    RowAddress(subarray_id << ROWS_PER_SUBARRAY.ilog2()) // lower bits=rows in subarray
+    RowAddress(subarray_id.0 << ROWS_PER_SUBARRAY.ilog2()) // lower bits=rows in subarray
 }
 
 /// All Subarrays (except the ones at the edges) have two neighboring subarrays: one below (subarray_id+1) and one above (subarray_id-1)
+/// - currently the following subarrays are used together for computations: 0&1,2&3,4&5,..
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub enum NeighboringSubarrayRelPosition {
     /// `subarray_id-1`
@@ -30,9 +31,9 @@ pub enum NeighboringSubarrayRelPosition {
 
 impl NeighboringSubarrayRelPosition {
     /// Get whether `subarray1` is above or below `relative_to`
-    pub fn get_relative_position(subarray: SubarrayId, relative_to: SubarrayId) -> Self {
-        assert!((subarray as isize - relative_to as isize).abs() == 1, "Given Arrays are not neighboring arrays");
-        if subarray > relative_to {
+    pub fn get_relative_position(subarray: &SubarrayId, relative_to: &SubarrayId) -> Self {
+        assert!((subarray.0 as isize - relative_to.0 as isize).abs() == 1, "Given Arrays are not neighboring arrays");
+        if subarray.0 > relative_to.0 {
             NeighboringSubarrayRelPosition::Below
         } else {
             NeighboringSubarrayRelPosition::Above
@@ -100,7 +101,7 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
     // TODO: NEXT
     let get_distance_of_row_to_sense_amps = |row: RowAddress, subarray_rel_position: NeighboringSubarrayRelPosition| -> RowDistanceToSenseAmps {
         // NOTE: last & first subarrays only have sense-amps from one side
-        if (row.get_subarray_id() == NR_SUBARRAYS-1 && subarray_rel_position == NeighboringSubarrayRelPosition::Below) || (row.get_subarray_id() == 0 && subarray_rel_position == NeighboringSubarrayRelPosition::Above) {
+        if (row.get_subarray_id().0 == NR_SUBARRAYS-1 && subarray_rel_position == NeighboringSubarrayRelPosition::Below) || (row.get_subarray_id().0 == 0 && subarray_rel_position == NeighboringSubarrayRelPosition::Above) {
             panic!("Edge subarrays have sense-amps only connected from one side");
         }
 
@@ -158,24 +159,29 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
 /// - ! must be smaller than `rows_per_subarray * nr_subarrays` (this is NOT checked!)
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct RowAddress(pub u64);
-pub type SubarrayId = u64;
 
 impl RowAddress {
     /// Return subarray-id the row lies in
     pub fn get_subarray_id(&self) -> SubarrayId {
-        (self.0 & SUBARRAY_ID_BITMASK) >> ROWS_PER_SUBARRAY.ilog2()
+        SubarrayId((self.0 & SUBARRAY_ID_BITMASK) >> ROWS_PER_SUBARRAY.ilog2())
+    }
+
+    /// Converts RowAddress to the same row address but in the other subarray
+    pub fn local_rowaddress_to_subarray_id(&self, subarray_id: SubarrayId) -> RowAddress {
+        let local_row_address = self.0 & ROW_ID_BITMASK;
+        RowAddress( local_row_address | subarrayid_to_subarray_address(subarray_id).0 )
     }
 }
 
 impl fmt::Display for RowAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.get_subarray_id(), self.0 & ROW_ID_BITMASK)
+        write!(f, "{}.{}", self.get_subarray_id().0, self.0 & ROW_ID_BITMASK)
     }
 }
 
 impl fmt::Debug for RowAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.get_subarray_id(), self.0 & ROW_ID_BITMASK)
+        write!(f, "{}.{}", self.get_subarray_id().0, self.0 & ROW_ID_BITMASK)
     }
 }
 
@@ -184,6 +190,29 @@ impl From<u64> for RowAddress {
         RowAddress(value)
     }
 }
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct SubarrayId(pub u64);
+
+impl SubarrayId {
+    /// Currently all ops only work on half of the cells (every 2nd cell) with two subarrays being
+    /// in a compute/reference subarray "relation" with exactly one other neighboring subarray.
+    /// This function returns that other partner (compute/reference) subarray
+    pub fn get_partner_subarray(&self) -> Self {
+        if self.0 % 2 == 0 {
+            SubarrayId(self.0 + 1)
+        } else {
+            SubarrayId(self.0 - 1)
+        }
+    }
+}
+
+impl fmt::Display for SubarrayId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 
 // impl Display for Vec<RowAddress> {
 //     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -398,7 +427,7 @@ pub enum Instruction {
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let display_row = |row: &RowAddress| { format!("{}.{}", row.get_subarray_id(), row.0 & ROW_ID_BITMASK)}; // display subarray separately
+        let display_row = |row: &RowAddress| { format!("{}.{}", row.get_subarray_id().0, row.0 & ROW_ID_BITMASK)}; // display subarray separately
         // TODO: change string-representation to display subarray-id
         let description = match self {
             Instruction::FracOp(row) => format!("AP({})", display_row(row)),
@@ -462,12 +491,12 @@ impl Instruction {
 
                 let (src_array, dst_array) = (src.get_subarray_id(), dst.get_subarray_id());
                 let furthest_src_row = activated_rows.iter()
-                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, NeighboringSubarrayRelPosition::get_relative_position(src_array, dst_array))) // RowDistanceToSenseAmps::Far; // TODO: get this
+                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, NeighboringSubarrayRelPosition::get_relative_position(&src_array, &dst_array))) // RowDistanceToSenseAmps::Far; // TODO: get this
                     .max()
                     .expect("[ERR] Activated rows were empty");
                 // NOTE: SRA is assumed to activate the same row-addresses in both subarrays
                 let closest_dst_row = activated_rows.iter()
-                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, NeighboringSubarrayRelPosition::get_relative_position(dst_array, src_array))) // RowDistanceToSenseAmps::Far; // TODO: get this
+                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, NeighboringSubarrayRelPosition::get_relative_position(&dst_array, &src_array))) // RowDistanceToSenseAmps::Far; // TODO: get this
                     .min()
                     .expect("[ERR] Activated rows were empty");
                 let total_success_rate = *success_rate_per_operandnr.get(&nr_operands).expect("[ERR] {nr_operands} not =1|2|4|8|16, the given SRA function seems to not comply with this core assumption.")
@@ -643,6 +672,14 @@ impl TryFrom<u8> for SupportedNrOperands {
     }
 }
 
+impl TryFrom<usize> for SupportedNrOperands {
+    type Error = ();
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Self::try_from(value as u8)
+    }
+}
+
 /// Implements behavior of the RowDecoderCircuitry as described in [3]
 /// TODO: remove in favor of passing arbitrary closure to [`FCDRAMArchitecture::get_activated_rows_from_apa`]
 pub trait RowDecoder {
@@ -666,6 +703,6 @@ mod tests {
 
     #[test] // mark function as test-fn
     fn test_sra() {
-        println!("{:?}", ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&SupportedNrOperands::try_from(8).unwrap()).unwrap().first());
+        println!("{:?}", ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&SupportedNrOperands::try_from(8 as u8).unwrap()).unwrap().first());
     }
 }
