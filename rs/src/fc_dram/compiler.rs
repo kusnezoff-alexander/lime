@@ -94,7 +94,7 @@ impl Compiler {
                 self.comp_state.candidates.extend(new_candidates);
         }
 
-        todo!("NEXT");
+        debug!("Instructions: {:?}", program.instructions);
         // optimize(&mut program);
 
         // store output operand location so user can retrieve them after running the program
@@ -357,51 +357,88 @@ impl Compiler {
         let mut subarray_id = 1; // start with 1 since edge subarrays cant be used as compute subarrays
         for output in network.outputs() {
             self.signal_to_subarrayids.insert(output, vec!(SubarrayId(subarray_id))); // determine (virtual) subarray in which output will reside
+            let neighboring_subarray = SubarrayId(subarray_id).get_partner_subarray();
+            let (actual_subarray , neighboring_subarray) = {
+
+                // if output is inverted, then the non-inverted value resides in the partner subarray
+                if output.is_inverted() {
+                    self.signal_to_subarrayids.insert(Signal::new(output.node_id(), false), vec!(neighboring_subarray)); // determine (virtual) subarray in which output will reside
+                    (neighboring_subarray, SubarrayId(subarray_id))
+                } else {
+                    (SubarrayId(subarray_id), neighboring_subarray)
+                }
+            };
+
             let (noninverted_src_signals, inverted_src_signals) = self.get_all_noninverted_src_signals(output, network);
 
-            println!("{:?}", noninverted_src_signals.clone());
+            println!("Noninverted src signals: {:?}", noninverted_src_signals.clone());
             // all directly (might in theory) reside in the same subarray as `output` (since no NOTS are inbtw which locate them to a neighboring subarray)
             for connected_signal in noninverted_src_signals {
-                self.signal_to_subarrayids.entry(connected_signal).or_default().push(SubarrayId(subarray_id)); // determine (virtual) subarray in which output will reside
+                self.signal_to_subarrayids.entry(connected_signal).or_default().push(actual_subarray); // determine (virtual) subarray in which output will reside
             }
 
-            // inverted signals need to be inverted and hence their non-inverted value is placed in the original subarray (from which it will be inverted later on into the neighboring subarray)
+            // Place direct inputs that ARE inverted in same subarray (while their non-inverted version will end up in the neighboring subarray)
             for inverted_signal in inverted_src_signals.as_slice() {
-                let uninverted_signal = Signal::new(inverted_signal.node_id(), false);
-                debug!("Placing Signal: {uninverted_signal:?} in {subarray_id} ");
-                self.signal_to_subarrayids.entry(uninverted_signal).or_default().push(SubarrayId(subarray_id)); // determine (virtual) subarray in which output will reside
+                self.signal_to_subarrayids.entry(*inverted_signal).or_default().push(actual_subarray); // determine (virtual) subarray in which output will reside
             }
             // place inverted signals in neighboring subarray, 2x inverted signals in same subarray, 3x inverted signals in neighboring subarray etc...
             // TODO: same thing as before: place non-inverted version of inverted signals in opposite subarray !
             // !!! doesnt support >=2 NOTs on one path yet !!!
-            let neighboring_subarray = subarray_id - 1; // place signals that are inverted odd number of times in Above subarray (arbitrary decision, epxloring whether this makes a difference might be explored in future)
             let mut unvisited_signals_in_same_subarray: Vec<Signal> = vec!(); // inverting even nr of times leads to signals being placed in same subarray
-            let mut unvisited_signals_in_neighboring_subarray = inverted_src_signals;
+            let mut unvisited_signals_in_neighboring_subarray: Vec<Signal> = inverted_src_signals.iter()
+                .filter(|signal| !network.node(signal.node_id()).is_leaf() ) // leaves don't need to be placed in neighboring subarray since inputs are placed by user
+                .map(|signal| Signal::new(signal.node_id(), false)).collect(); // before negation the signals are in the neighboring subarray
             while !unvisited_signals_in_same_subarray.is_empty() || !unvisited_signals_in_neighboring_subarray.is_empty() {
                 // println!("Same subarray: {:?}", unvisited_signals_in_same_subarray);
                 // println!("Neighboring subarray: {:?}", unvisited_signals_in_neighboring_subarray);
                 if let Some(signal_neighboring_subarray) = unvisited_signals_in_neighboring_subarray.pop() {
 
-                    self.signal_to_subarrayids.entry(signal_neighboring_subarray).or_default().push(SubarrayId(neighboring_subarray));
+                    self.signal_to_subarrayids.entry(signal_neighboring_subarray).or_default().push(neighboring_subarray);
                     // these are placed in the Above subarray (arbitrary decision, epxloring whether this makes a difference might be explored in future)
-                    let (signals_neighboring_subarray_of_output,  mut signals_same_subarray_as_output) = self.get_all_noninverted_src_signals(signal_neighboring_subarray, network);
+                    // NOTE: signals that are inverted an even nr of times are placed in the same subarray as the output
+                    let (signals_neighboring_subarray_of_output,  signals_inverted_even_nr_times) = self.get_all_noninverted_src_signals(signal_neighboring_subarray, network);
                     for inverted_signal in signals_neighboring_subarray_of_output {
-                        self.signal_to_subarrayids.entry(inverted_signal).or_default().push(SubarrayId(neighboring_subarray));
+                        self.signal_to_subarrayids.entry(inverted_signal).or_default().push(neighboring_subarray);
                     }
 
-                    unvisited_signals_in_same_subarray.append(&mut signals_same_subarray_as_output);
+                    // signals which are inverted again require the non-inverted version to be in the other subarray
+                    let mut signals_to_invert_once_more: Vec<Signal> = signals_inverted_even_nr_times.into_iter().filter(|signal| {
+                        if  network.node(signal.node_id()).is_leaf() {
+                            // is input signal
+                            self.signal_to_subarrayids.entry(*signal).or_default().push(neighboring_subarray);
+                            false
+                        } else { true }
+                    }).collect(); // inputs are placed by user (also inverted ones)
+                    for even_times_inverted_signals in signals_to_invert_once_more.as_slice() {
+                        let signal = Signal::new(even_times_inverted_signals.node_id(), false);
+                        self.signal_to_subarrayids.entry(signal).or_default().push(actual_subarray);
+                    }
+                    unvisited_signals_in_same_subarray.append(&mut signals_to_invert_once_more);
                 }
 
                 if let Some(signal_same_subarray) = unvisited_signals_in_same_subarray.pop() {
 
-                    self.signal_to_subarrayids.entry(signal_same_subarray).or_default().push(SubarrayId(subarray_id));
+                    self.signal_to_subarrayids.entry(signal_same_subarray).or_default().push(actual_subarray);
                     // signals inverted even nr of times are placed in the same subarray as the `output` Signal
-                    let (signals_same_subarray_of_output,  mut signals_neighboring_subarray_as_output) = self.get_all_noninverted_src_signals(signal_same_subarray, network);
+                    // NOTE: signals that are inverted an odd nr of times are placed in the neighboring subarray of the output
+                    let (signals_same_subarray_of_output,  signals_inverted_even_nr_times) = self.get_all_noninverted_src_signals(signal_same_subarray, network);
                     for signal in signals_same_subarray_of_output {
-                        self.signal_to_subarrayids.entry(signal).or_default().push(SubarrayId(subarray_id));
+                        self.signal_to_subarrayids.entry(signal).or_default().push(actual_subarray);
                     }
 
-                    unvisited_signals_in_neighboring_subarray.append(&mut signals_neighboring_subarray_as_output);
+                    // signals which are inverted again require the non-inverted version to be in the other subarray
+                    let mut signals_to_invert_once_more: Vec<Signal> = signals_inverted_even_nr_times.into_iter().filter(|signal| {
+                        if  network.node(signal.node_id()).is_leaf() {
+                            // is input signal
+                            self.signal_to_subarrayids.entry(*signal).or_default().push(neighboring_subarray);
+                            false
+                        } else { true }
+                    }).collect(); // inputs are placed by user (also inverted ones)
+                    for even_times_inverted_signals in signals_to_invert_once_more.as_slice() {
+                        let signal = Signal::new(even_times_inverted_signals.node_id(), false);
+                        self.signal_to_subarrayids.entry(signal).or_default().push(neighboring_subarray);
+                    }
+                    unvisited_signals_in_neighboring_subarray.append(&mut signals_to_invert_once_more);
                 }
             }
 
@@ -507,11 +544,26 @@ impl Compiler {
     /// - NOTE: currenlty only single-operand NOTs are supported bc
     ///     1) more operands lead to (slightly) worse results (see Figure10 in [1])
     ///     2) since there are separate compute rows using multiple dst rows doesn't make sense (the values need to be copied out of the dst-rows anyway into non-compute rows)
-    fn execute_not(&self, signal_to_invert: &Signal) -> Vec<Instruction> {
+    fn execute_not(&mut self, signal_to_invert: &Signal, dst_array: SubarrayId) -> Vec<Instruction> {
+        let mut instructions = vec!();
         let row_combi = self.compute_row_activations.get(&(SupportedNrOperands::One, NeighboringSubarrayRelPosition::Above)).unwrap();
-        // perform `NOT`
+        let src_array = dst_array.get_partner_subarray();
 
-        let row_combi_correct_subarray = todo!(); // REMINDER: rows returned `compute_row_activations` are not yet adjusted for the right subarray
+        // 1. Copy non-inverted operand into src-row
+        let src_row = row_combi.0.local_rowaddress_to_subarray_id(src_array);
+        let src_location = self.comp_state.value_states.get(&(*signal_to_invert, src_array)).unwrap_or_else(|| panic!("Src operand {src_row} is not live in subarray {src_array}??"));
+
+        instructions.push(self.execute_intrasubarray_rowclone(*src_location, src_row));
+
+        // 2. Execute NOT
+        let dst_row = row_combi.1.local_rowaddress_to_subarray_id(dst_array);
+        instructions.push(Instruction::ApaNOT(src_row, dst_row));
+
+        // 3. Copy negated value out of compute rows
+        let free_row = self.comp_state.free_rows_per_subarray.get_mut(&dst_array).and_then(|v| v.pop()).unwrap_or_else(|| panic!("OOM: No free rows in subarray {dst_array}"));
+        instructions.push(self.execute_intrasubarray_rowclone(dst_row, free_row));
+
+        instructions
     }
 
     /// Returns the instructions needed to perform `language_op` placing the result in a free row in the `compute_subarray`
@@ -585,11 +637,10 @@ impl Compiler {
 
         println!("EXECUTING {:?}", next_candidate);
         next_instructions.append(&mut self.execute_and_or(node_id, compute_subarray, network));
-        todo!("NEXT");
 
         // 2. Negate the result (if needed)
         if signal.is_inverted() {
-            let mut negate_instructions = self.execute_not(signal);
+            let mut negate_instructions = self.execute_not(signal, *result_subarray);
             next_instructions.append(&mut negate_instructions);
         }
         next_instructions
