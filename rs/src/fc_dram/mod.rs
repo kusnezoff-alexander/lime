@@ -24,7 +24,6 @@ pub mod optimization;
 pub mod program;
 pub mod utils;
 
-use std::ffi::{CStr, OsStr};
 use std::sync::LazyLock;
 use std::time::Instant;
 
@@ -56,13 +55,15 @@ static REWRITE_RULES: LazyLock<Vec<Rewrite<AoigLanguage, ()>>> = LazyLock::new(|
         rewrite!("or-and-more-not"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
         rewrite!("and-same"; "(and ?a ?a)" => "?a"),
         rewrite!("not_not"; "(! (! ?a))" => "?a"),
+
+        // in general more operands are better for AND/OR (see [1])
         rewrite!("and2_to_4"; "(and (and ?a ?b) (and ?c ?d))" => "(and4 ?a ?b ?c ?d)"),
-        // TODO:
-        // rewrite!("and4_to_8"; "(and (and ?a ?b) (and ?c ?d))" => "(and ?a ?b ?c ?d)"),
-        // rewrite!("and8_to_16"; "(and (and ?a ?b) (and ?c ?d))" => "(and ?a ?b ?c ?d)"),
-        // rewrite!("maj_1"; "(maj ?a ?a ?b)" => "?a"),
-        // rewrite!("maj_2"; "(maj ?a (! ?a) ?b)" => "?b"),
-        // rewrite!("associativity"; "(maj ?a ?b (maj ?c ?b ?d))" => "(maj ?d ?b (maj ?c ?b ?a))"),
+        rewrite!("and4_to_8"; "(and (and4 ?a ?b ?c ?d) (and4 ?e ?f ?g ?h))" => "(and8 ?a ?b ?c ?d ?e ?f ?g ?h)"),
+        rewrite!("and8_to_16"; "(and (and8 ?a ?b ?c ?d ?e ?f ?g ?h) (and8 ?i ?j ?k ?l ?m ?n ?o ?p))" => "(and16 ?a ?b ?c ?d ?e ?f ?g ?h ?i ?j ?k ?l ?m ?n ?o ?p)"),
+        rewrite!("or2_to_4"; "(or (or ?a ?b) (or ?c ?d))" => "(or4 ?a ?b ?c ?d)"),
+        rewrite!("or4_to_8"; "(or (or4 ?a ?b ?c ?d) (or4 ?e ?f ?g ?h))" => "(or8 ?a ?b ?c ?d ?e ?f ?g ?h)"),
+        rewrite!("or8_to_16"; "(or (or8 ?a ?b ?c ?d ?e ?f ?g ?h) (or8 ?i ?j ?k ?l ?m ?n ?o ?p))" => "(or16 ?a ?b ?c ?d ?e ?f ?g ?h ?i ?j ?k ?l ?m ?n ?o ?p)"),
+        // TODO: no use for NOT with multiple dsts
     ];
     // rules.extend(rewrite!("invert"; "(! (maj ?a ?b ?c))" <=> "(maj (! ?a) (! ?b) (! ?c))"));
     // rules.extend(rewrite!("distributivity"; "(maj ?a ?b (maj ?c ?d ?e))" <=> "(maj (maj ?a ?b ?c) (maj ?a ?b ?d) ?e)"));
@@ -106,16 +107,16 @@ fn compiling_receiver<'a>(
             );
             // 1. Create E-Graph: run equivalence saturation
             debug!("Running equivalence saturation...");
-            // let runner = measure_time!(
-            //     Runner::default().with_egraph(graph).run(rules),  "t_runner", settings.print_compilation_stats
-            // );
-            //
-            // if settings.verbose {
-            //     println!("== Runner Report");
-            //     runner.print_report();
-            // }
-            //
-            // let graph = runner.egraph;
+            let runner = measure_time!(
+                Runner::default().with_egraph(graph).run(rules),  "t_runner", settings.print_compilation_stats
+            );
+
+            if settings.verbose {
+                println!("== Runner Report");
+                runner.print_report();
+            }
+
+            let graph = runner.egraph;
 
             CompilerOutput::new(
                 graph,

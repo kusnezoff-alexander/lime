@@ -300,6 +300,7 @@ pub struct FCDRAMArchitecture {
     get_activated_rows_from_apa: fn(RowAddress, RowAddress) -> Vec<RowAddress>,
     /// Stores which rows are simultaneously activated for each combination of Row-Addresses (provided to `APA`-operation)
     /// - REASON: getting the simultaneously activated will probably be requested very frequently (time-space tradeoff, rather than recomputing on every request))
+    /// - REMEMBER: set `subarrayid` of passed row-addresses to 0 (activated rows are precomputed exemplary for RowAddresses in subarray=0 since activated rows do <u>not</u> depend on corresponding subarrays)
     pub precomputed_simultaneous_row_activations: HashMap<(RowAddress, RowAddress), Vec<RowAddress>>,
     /// Map degree of SRA (=nr of activated rows by that SRA) to all combinations of RowAddresses which have that degree of SRA
     /// - use to eg restrict the choice of row-addresses for n-ary AND/OR (eg 4-ary AND -> at least activate 8 rows; more rows could be activated when using input replication)
@@ -432,7 +433,7 @@ impl Display for Instruction {
         let description = match self {
             Instruction::FracOp(row) => format!("AP({})", display_row(row)),
             Instruction::ApaNOT(row1,row2) => format!("APA_NOT({},{})", display_row(row1), display_row(row2)),
-            Instruction::ApaAndOr(row1,row2) => format!("APA_AND_OR({},{}) // activates {:?}", display_row(row1), display_row(row2), ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(*row1,*row2))),
+            Instruction::ApaAndOr(row1,row2) => format!("APA_AND_OR({},{}) // activates {:?}", display_row(row1), display_row(row2), ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(row1.local_rowaddress_to_subarray_id(SubarrayId(0)),row2.local_rowaddress_to_subarray_id(SubarrayId(0))))),
             Instruction::RowCloneFPM(row1, row2, comment) => format!("AA({},{}) // {}", display_row(row1), display_row(row2), comment),
             Instruction::RowClonePSM(row1, row2) => format!("
                 TRANSFER(<this_bank>{},<other_bank>(rowX))
