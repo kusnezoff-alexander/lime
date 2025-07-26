@@ -4,6 +4,7 @@ use eggmock::egg::{CostFunction, Id};
 use eggmock::{AoigLanguage, egg::Language};
 use log::debug;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::ops;
 use std::rc::Rc;
 
@@ -83,11 +84,15 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
         C: FnMut(Id) -> Self::Cost,
     {
         // TODO: detect self-cycles, other cycles will be detected by compiling, which will result in an error
-        // enode.children();
-        // TODO: rewrite to `.fold()`
+
+        // see Figure17 [1]
+        let and_nr_operand_to_success_rate: HashMap<usize, f64> = HashMap::from([(2,0.85), (4,0.88), (8,0.9), (16,0.92)]); // read from graph (only estimates anyway)
+        let or_nr_operand_to_success_rate: HashMap<usize, f64> = HashMap::from([(2,0.88), (4,0.9), (8,0.96), (16,0.98)]); // read from graph (only estimates anyway)
+
+        // return higher success-rates for higher n in nary AND/OR (see Figure18 [1])
+        let nr_operands = enode.children().len();
 
         // get op-cost of executing `enode`:
-        // TODO: return higher success-rates for higher n in nary AND/OR
         let op_cost = match *enode {
             AoigLanguage::False | AoigLanguage::Input(_) => {
                 InstructionCost {
@@ -95,49 +100,43 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                     mem_cycles: 1, // !=0 to ensure Cost-Function is *strictly monotonically increasing* (TODO: monotonicity isn"t needed here, right?")
                 }
             },
-            AoigLanguage::And([node1, node2]) => {
+            AoigLanguage::And(_) | AoigLanguage::And4(_) | AoigLanguage::And8(_) | AoigLanguage::And16(_) => {
 
                 let mem_cycles_and  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::AND)
                     .iter().fold(0, |acc, instr| { acc + instr.get_nr_memcycles() as usize });
                 debug!("Cycles AND: {}",  mem_cycles_and);
-                let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
+                let expected_success_rate = 0.83; // see Figure17 [1], assume that compute rows have a "middle" distance to sense-amps
+                let &success_rate_operand = and_nr_operand_to_success_rate.get(&nr_operands).unwrap();
                 InstructionCost {
-                    success_rate: SuccessRate::new(expected_success_rate),
+                    success_rate: SuccessRate::new(expected_success_rate * success_rate_operand),
                     mem_cycles: mem_cycles_and,
                 }
 
             },
-            AoigLanguage::Or([node1, node2]) => {
+            AoigLanguage::Or(_) | AoigLanguage::Or4(_) | AoigLanguage::Or8(_) | AoigLanguage::Or16(_) => {
                 let mem_cycles_or  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::OR)
                     .iter().fold(0, |acc, instr| { acc + instr.get_nr_memcycles() as usize });
                 debug!("Cycles OR: {}",  mem_cycles_or);
-                let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
+                let expected_success_rate = 0.94;  // see Figure17 [1], assume that compute rows have a "middle" distance to sense-amps
+                let success_rate_operand = or_nr_operand_to_success_rate.get(&nr_operands).unwrap();
                 InstructionCost {
-                    success_rate: SuccessRate::new(expected_success_rate),
+                    success_rate: SuccessRate::new(expected_success_rate * success_rate_operand),
                     mem_cycles: mem_cycles_or,
                 }
             },
             // TODO: increase cost of NOT? (since it moves the value to another subarray!)
             // eg prefer `OR(a,b)` to `NOT(AND( NOT(a), NOT(b)))`
-            AoigLanguage::Not(node) => {
+            AoigLanguage::Not(_) => {
                 let mem_cycles_not  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::NOT)
                     .iter().fold(0, |acc, instr| { acc + instr.get_nr_memcycles() as usize });
                 debug!("Cycles NOT: {}",  mem_cycles_not);
-                let expected_success_rate = 1.0; // TODO: do empirical analysis of success-rate matrices of ops and come up with good values
+                let expected_success_rate = 0.77; // see Figure11 in [1] (we only use single operand NOT currently)
 
                 InstructionCost {
                     success_rate: SuccessRate::new(expected_success_rate),
                     mem_cycles: mem_cycles_not,
                 }
             },
-            _ => {
-                // todo!();
-                InstructionCost {
-                    success_rate: SuccessRate::new(1.0),
-                    mem_cycles: 7,
-                }
-                // 0 // TODO: implement for nary-ops, eg using `.children()`
-            }
         };
 
         debug!("Folding {:?}", enode);
