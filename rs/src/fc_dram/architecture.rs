@@ -418,12 +418,6 @@ pub enum Instruction {
     ///
     /// Comment indicates what this FPM was issued for (for simpler debugability)
     RowCloneFPM(RowAddress, RowAddress, Comment),
-    /// Copies data from src (1st operand) to dst (2nd operand) using RowClonePSM, which copies the
-    /// data from `this_bank(src_row) -> other_bank(rowX) -> this_bank(dst_row)` (where
-    /// `other_bank` might be any other bank). Since this copy uses the internal DRAM-bus it works
-    /// on cacheline-granularity (64B) which might take some time for 8KiB rows...
-    /// - see [4] Chap3.3 for `TRANSFER`-instruction
-    RowClonePSM(RowAddress, RowAddress),
 }
 
 impl Display for Instruction {
@@ -435,13 +429,7 @@ impl Display for Instruction {
             Instruction::ApaNOT(row1,row2) => format!("APA_NOT({},{})", display_row(row1), display_row(row2)),
             Instruction::ApaAndOr(row1,row2) => format!("APA_AND_OR({},{}) // activates {:?}", display_row(row1), display_row(row2), ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(row1.local_rowaddress_to_subarray_id(SubarrayId(0)),row2.local_rowaddress_to_subarray_id(SubarrayId(0))))),
             Instruction::RowCloneFPM(row1, row2, comment) => format!("AA({},{}) // {}", display_row(row1), display_row(row2), comment),
-            Instruction::RowClonePSM(row1, row2) => format!("
-                TRANSFER(<this_bank>{},<other_bank>(rowX))
-                TANSFER(<other_bank>rowX,<this_bank>{})
-                ",
-                display_row(row1),
-                display_row(row2)
-        )};
+        };
         write!(f, "{}", description)
     }
 }
@@ -458,7 +446,6 @@ impl Instruction {
             Instruction::ApaNOT(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
             Instruction::ApaAndOr(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
             Instruction::RowCloneFPM(_, _, _) => 2,    // see [4] Chap3.2
-            Instruction::RowClonePSM(_, _) => 256,  // =(8192B/64B)*2 (*2 since copies two time, to and from `<other_bank>` on 64B-granularity
         }
     }
 

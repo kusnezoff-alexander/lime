@@ -44,15 +44,14 @@ use architecture::*;
 /// TODO: adjust rewriting rules to FCDRAM (=AND/OR related rewrites like De-Morgan?)
 static REWRITE_RULES: LazyLock<Vec<Rewrite<AoigLanguage, ()>>> = LazyLock::new(|| {
     let rules = vec![
-        // TODO: add "or" - and De-Morgan ?
         rewrite!("commute-and"; "(and ?a ?b)" => "(and ?b ?a)"),
         rewrite!("and-1"; "(and ?a 1)" => "?a"),
         rewrite!("and-0"; "(and ?a 0)" => "0"),
-        // TODO: first add `AOIG`-language and add conversion AOIG<->AIG (so mockturtle's aig can still be used underneath)
-        rewrite!("and-or"; "(! (or (! ?a) (! ?b)))" => "(and ?a ?b)"), // (De-Morgan) ! not checked whether this works
-        rewrite!("or-and"; "(! (and (! ?a) (! ?b)))" => "(or ?a ?b)" ), // (De-Morgan) ! not checked whether this works
-        rewrite!("and-or-more-not"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
-        rewrite!("or-and-more-not"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan) ! not checked whether this works
+
+        rewrite!("and-or"; "(! (or (! ?a) (! ?b)))" => "(and ?a ?b)"), // (De-Morgan)
+        rewrite!("or-and"; "(! (and (! ?a) (! ?b)))" => "(or ?a ?b)" ), // (De-Morgan)
+        rewrite!("and-or-more-not"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan)
+        rewrite!("or-and-more-not"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan)
         rewrite!("and-same"; "(and ?a ?a)" => "?a"),
         rewrite!("not_not"; "(! (! ?a))" => "?a"),
 
@@ -63,10 +62,8 @@ static REWRITE_RULES: LazyLock<Vec<Rewrite<AoigLanguage, ()>>> = LazyLock::new(|
         rewrite!("or2_to_4"; "(or (or ?a ?b) (or ?c ?d))" => "(or4 ?a ?b ?c ?d)"),
         rewrite!("or4_to_8"; "(or (or4 ?a ?b ?c ?d) (or4 ?e ?f ?g ?h))" => "(or8 ?a ?b ?c ?d ?e ?f ?g ?h)"),
         rewrite!("or8_to_16"; "(or (or8 ?a ?b ?c ?d ?e ?f ?g ?h) (or8 ?i ?j ?k ?l ?m ?n ?o ?p))" => "(or16 ?a ?b ?c ?d ?e ?f ?g ?h ?i ?j ?k ?l ?m ?n ?o ?p)"),
-        // TODO: no use for NOT with multiple dsts
+        // no use for NOT with multiple dsts (for now)
     ];
-    // rules.extend(rewrite!("invert"; "(! (maj ?a ?b ?c))" <=> "(maj (! ?a) (! ?b) (! ?c))"));
-    // rules.extend(rewrite!("distributivity"; "(maj ?a ?b (maj ?c ?d ?e))" <=> "(maj (maj ?a ?b ?c) (maj ?a ?b ?d) ?e)"));
     rules
 });
 

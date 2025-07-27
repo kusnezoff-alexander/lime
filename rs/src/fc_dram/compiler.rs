@@ -508,60 +508,33 @@ impl Compiler {
         match logic_op {
             LogicOp::AND => {
                 let frac_row = ref_rows.pop().expect("Min 1 row has to be passed for initializing ref subarray"); // TODO: include success-rate considerations to choose best row to use for storing `V_{DD}/2`
-                let row_address_1 = self.comp_state.constant_values.get(&1).expect("Constants are expected to be placed in every subarray beforehand"); // row address where all 1s (V_DD) is stored
+                let row_address_1 = self.comp_state.constant_values.get(&1).expect("Constants are expected to be placed in every subarray beforehand")
+                    .local_rowaddress_to_subarray_id(frac_row.get_subarray_id()); // row address where all 1s (V_DD) are to bestored
                 let mut instructions = vec!();
                 for _ in 0..self.settings.repetition_fracops {
                     instructions.push(Instruction::FracOp(frac_row));
                 }
                 for other_row in ref_rows {
-                    instructions.push(Instruction::RowCloneFPM(*row_address_1, other_row, String::from("Init ref-subarray with 1s")));
+                    instructions.push(Instruction::RowCloneFPM(row_address_1, other_row, String::from("Init ref-subarray with 1s")));
                 }
                 instructions
             },
             LogicOp::OR => {
                 let frac_row = ref_rows.pop().expect("Min 1 row has to be passed for initializing ref subarray"); // TODO: include success-rate considerations to choose best row to use for storing `V_{DD}/2`
-                let row_address_0 = self.comp_state.constant_values.get(&0).expect("Constants are expected to be placed in every subarray beforehand"); // row address where all 1s (V_DD) is stored
+                let row_address_0 = self.comp_state.constant_values.get(&0).expect("Constants are expected to be placed in every subarray beforehand")
+                    .local_rowaddress_to_subarray_id(frac_row.get_subarray_id()); // row address where all 0s (GND) are to be stored
                 let mut instructions = vec!();
                 for _ in 0..self.settings.repetition_fracops {
                     instructions.push(Instruction::FracOp(frac_row));
                 }
                 for other_row in ref_rows {
-                    instructions.push(Instruction::RowCloneFPM(*row_address_0, other_row, String::from("Init ref-subarray with 0s")));
+                    instructions.push(Instruction::RowCloneFPM(row_address_0, other_row, String::from("Init ref-subarray with 0s")));
                 }
                 instructions
             },
             LogicOp::NOT => vec!(),
             _ => panic!("{logic_op:?} not supported yet"),
         }
-    }
-
-    /// Places the referenced `src_operands` into the corresponding `row_addresses` which are expected to be simultaneously executed using [`Instruction::RowCloneFPM`]
-    /// - NOTE: `rel_pos_of_ref_subarray` might affect placement of inputs in the future (eg to choose which input rows to choose for *input replication*)
-    fn init_compute_subarray(&mut self, mut row_addresses: Vec<RowAddress>, mut src_operands: Vec<Signal>, subarray: SubarrayId, logic_op: LogicOp, rel_pos_of_ref_subarray: NeighboringSubarrayRelPosition) -> Vec<Instruction> {
-        // TODO: validity check: make sure all inputs are actually already inside `subarray`
-
-        let mut instructions = vec!();
-        // if there are fewer src-operands than activated rows perform input replication
-        row_addresses.sort_by_key(|row| ((ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, rel_pos_of_ref_subarray.clone()))); // replicate input that resides in row with lowest success-rate (=probably the row furthest away)
-        let nr_elements_to_extend = row_addresses.len() - src_operands.len();
-        if nr_elements_to_extend > 0 {
-            let last_element = *src_operands.last().unwrap();
-            src_operands.extend( std::iter::repeat_n(last_element, nr_elements_to_extend));
-        }
-
-        for (&row_addr, &src_operand) in row_addresses.iter().zip(src_operands.iter()) {
-            let src_operand_location = self.comp_state.value_states.get(&(src_operand, subarray)).expect("Src operand not available although it is used by a candidate. Sth went wrong...");
-
-            self.comp_state.dram_state.insert(row_addr, RowState { is_compute_row: true, live_value: Some(src_operand), constant: None });
-
-            // TODO:
-            if (src_operand_location.0 & SUBARRAY_ID_BITMASK) == (row_addr.0 & SUBARRAY_ID_BITMASK) {
-                instructions.push(Instruction::RowCloneFPM(*src_operand_location, row_addr, String::from("Move operand to compute row")));
-            } else {
-                instructions.push(Instruction::RowClonePSM(*src_operand_location, row_addr)); // TODO: remove this, since it's not usable in COTS DRAMs
-            }
-        }
-        instructions
     }
 
     /// Returns instructions to be executed for performing `NOT` on `src_row` into `dst_row` and updates the `comp_state` holding the negated value
