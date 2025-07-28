@@ -83,7 +83,6 @@ impl Compiler {
 
         // 1. Actual compilation
         while let Some((next_candidate, _)) = self.comp_state.candidates.pop() {
-                // TODO: extend program with instr that is executed next
                 let executed_instructions = &mut self.execute_next_instruction(&next_candidate, network);
                 program.instructions.append(executed_instructions);
 
@@ -92,6 +91,9 @@ impl Compiler {
                 debug!("New candidates: {:?}", new_candidates);
 
                 self.comp_state.candidates.extend(new_candidates);
+
+                // TODO: move result into a free row
+                // TODO: mark rows containing non-live values as free
         }
 
         debug!("Instructions: {:?}", program.instructions);
@@ -552,7 +554,7 @@ impl Compiler {
         let unnegated_signal = Signal::new(signal_to_invert.node_id(), false);
         let src_location = self.comp_state.value_states.get(&(unnegated_signal, src_array)).unwrap_or_else(|| panic!("Src operand {src_row} is not live in subarray {src_array} (see {signal_to_invert:?})??"));
 
-        instructions.push(self.execute_intrasubarray_rowclone(*src_location, src_row));
+        instructions.push(self.execute_intrasubarray_rowclone(*src_location, src_row, String::from("Move into compute row")));
 
         // 2. Execute NOT
         let dst_row = row_combi.1.local_rowaddress_to_subarray_id(dst_array);
@@ -560,7 +562,7 @@ impl Compiler {
 
         // 3. Copy negated value out of compute rows
         let free_row = self.comp_state.free_rows_per_subarray.get_mut(&dst_array).and_then(|v| v.pop()).unwrap_or_else(|| panic!("OOM: No free rows in subarray {dst_array}"));
-        instructions.push(self.execute_intrasubarray_rowclone(dst_row, free_row));
+        instructions.push(self.execute_intrasubarray_rowclone(dst_row, free_row, String::from("Move into free row")));
         self.comp_state.value_states.insert((*signal_to_invert, dst_array), free_row);
 
         instructions
@@ -587,7 +589,7 @@ impl Compiler {
         for (&compute_row, &src_signal) in compute_rows.iter().zip(network.node(node_id).inputs()) {
             let compute_row = compute_row.local_rowaddress_to_subarray_id(compute_subarray);
             let &src_row = self.comp_state.value_states.get(&(src_signal, compute_subarray)).unwrap_or_else(|| panic!("Src signal {src_signal:?} is not present in compute subarray {compute_subarray} ???"));
-            instructions.push(self.execute_intrasubarray_rowclone(src_row, compute_row));
+            instructions.push(self.execute_intrasubarray_rowclone(src_row, compute_row, String::from("Move into compute row")));
         }
 
 
@@ -607,14 +609,16 @@ impl Compiler {
         instructions.push(Instruction::ApaAndOr(compute_row_combi.0.local_rowaddress_to_subarray_id(compute_subarray), compute_row_combi.1.local_rowaddress_to_subarray_id(SubarrayId(reference_subarray))));
 
         // 3. Move result into non-compute row
+        // TODO: add instruction to move value into free-row !!
         let free_row = self.comp_state.free_rows_per_subarray.get_mut(&compute_subarray).and_then(|v| v.pop()).unwrap_or_else(|| panic!("No more free rows in subarray {compute_subarray}"));
+        instructions.push(self.execute_intrasubarray_rowclone(compute_rows[0], free_row, String::from("Move into free row")));
         self.comp_state.value_states.insert((Signal::new(node_id, false), compute_subarray), free_row); // TODO: for inverted signals not in result_subarray, right?
 
         instructions
     }
 
-    fn execute_intrasubarray_rowclone(&self, src_row: RowAddress, dst_row: RowAddress) -> Instruction {
-        Instruction::RowCloneFPM(src_row, dst_row, String::from("Move into compute row"))
+    fn execute_intrasubarray_rowclone(&self, src_row: RowAddress, dst_row: RowAddress, comment: String) -> Instruction {
+        Instruction::RowCloneFPM(src_row, dst_row, comment)
     }
 
     /// Returns Instructions to execute given `next_candidate` (which is a signal which needs to reside in a specific subarray after performing the execution)
@@ -644,88 +648,6 @@ impl Compiler {
             next_instructions.append(&mut negate_instructions);
         }
         next_instructions
-
-        //
-        // debug!("Executing candidate {:?}", next_candidate);
-        // let src_operands: Vec<Signal> = network.node(next_candidate.node_id()).inputs().to_vec();
-        // let mut init_neg_operands = self.init_negated_src_operands(src_operands.clone(), network); // TODO NEXT: make sure all required negated operands are available
-        // next_instructions.append(&mut init_neg_operands);
-        //
-        // let nr_operands = src_operands.len(); // use to select SRA to activate
-        // let nr_rows = nr_operands.next_power_of_two();
-        //
-        // let src_rows: Vec<RowAddress> = src_operands.iter()
-        //     .map(|src_operand| {
-        //
-        //         debug!("src: {src_operand:?}");
-        //         self.comp_state.value_states.get(src_operand)
-        //             .unwrap()
-        //             .row_location
-        //             .expect("Sth went wrong... if the src-operand is not in a row, then this candidate shouldn't have been added to the list of candidates")
-        //     })
-        //     .collect();
-        //
-        // let (compute_subarray, ref_subarray) = self.select_compute_and_ref_subarray(src_rows);
-        // let language_op = network.node(next_candidate.node_id());
-        //
-        // // TODO: extract NOT
-        // let logic_op = match language_op {
-        //     // REMINDER: operand-nr is extracted by looking at nr of children beforehand
-        //     Aoig::And(_) | Aoig::And4(_) | Aoig::And8(_)| Aoig::And16(_) => LogicOp::AND,
-        //     Aoig::Or(_) | Aoig::Or4(_) | Aoig::Or8(_) | Aoig::Or16(_) => LogicOp::OR,
-        //     _ => panic!("candidate is expected to be a logic op"),
-        // };
-        //
-        // // 0. Select an SRA (=row-address tuple) for the selected subarray based on highest success-rate
-        // // TODO (possible improvement): input replication by choosing SRA with more activated rows than operands and duplicating operands which are in far-away rows into several rows?)
-        // let row_combi = ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&SupportedNrOperands::try_from(nr_rows as u8).unwrap()).unwrap()
-        //     // sort by success-rate - using eg `BTreeMap` turned out to impose a too large runtime overhead
-        //     .iter()
-        //     .find(|combi| !self.blocked_row_combinations.contains(combi)) // choose first block RowAddr-combination
-        //     .expect("No SRA for nr-rows={nr_rows}");
-        //
-        // let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(row_combi).unwrap();
-        // let ref_rows: Vec<RowAddress> = activated_rows.iter()
-        //     .map(|row| row & (subarrayid_to_subarray_address(ref_subarray))) // make activated rows refer to the right subarray
-        //     .collect();
-        // let comp_rows: Vec<RowAddress>  = activated_rows.iter()
-        //     .map(|row| row & (subarrayid_to_subarray_address(compute_subarray))) // make activated rows refer to the right subarray
-        //     .collect();
-        //
-        //
-        // // 1. Initialize rows in ref-subarray (if executing AND/OR)
-        // // - TODO: read nr of frac-ops to issue from compiler-settings
-        // let mut instruction_init_ref_subarray  = self.init_reference_subarray(ref_rows.clone(), logic_op);
-        // next_instructions.append(&mut instruction_init_ref_subarray);
-        //
-        // // 2. Place rows in the simultaneously activated rows in the compute subarray (init other rows with 0 for OR, 1 for AND and same value for NOT)
-        // let mut instructions_init_comp_subarray = self.init_compute_subarray( activated_rows.clone(), src_operands, logic_op, NeighboringSubarrayRelPosition::get_relative_position(compute_subarray, ref_subarray));
-        // next_instructions.append(&mut instructions_init_comp_subarray);
-        //
-        // // SKIPPED: 2.2 Check if issuing `APA(src1,src2)` would activate other rows which hold valid data
-        // // - only necessary once we find optimization to not write values to safe-space but reuse them diectly
-        // // 2.2.1 if yes: move data to other rows for performing this op
-        //
-        // // 3. Issue actual operation
-        // let mut actual_op = match logic_op {
-        //     LogicOp::NOT => vec!(Instruction::ApaNOT(row_combi.0, row_combi.1)),
-        //     LogicOp::AND | LogicOp::OR => vec!(Instruction::ApaAndOr(row_combi.0, row_combi.1)),
-        //     LogicOp::NAND | LogicOp::NOR => vec!(Instruction::ApaAndOr(row_combi.0, row_combi.1), Instruction::ApaNOT(row_combi.0, row_combi.1)), // TODO: or the othyer way around (1st NOT)?
-        // };
-        //
-        // next_instructions.append(&mut actual_op);
-        // for (&comp_row, &ref_row) in comp_rows.iter().zip(ref_rows.iter()) {
-        //     self.comp_state.dram_state.insert(comp_row, RowState { is_compute_row: true, live_value: Some(*next_candidate), constant: None });
-        //     self.comp_state.value_states.insert(*next_candidate, ValueState { is_computed: true, row_location: Some(comp_row) });
-        //     // ref subarray holds negated value afterwarsd
-        //     self.comp_state.dram_state.insert(ref_row, RowState { is_compute_row: true, live_value: Some(next_candidate.invert()), constant: None });
-        //     self.comp_state.value_states.insert(next_candidate.invert(), ValueState { is_computed: true, row_location: Some(ref_row) });
-        // }
-        //
-        // // 4. Copy result data from dst NEAREST to the sense-amps into a safe-space row and update `value_state`
-        // // TODO LAST: possible improvement - error correction over all dst-rows (eg majority-vote for each bit, votes weighted by distance to sense-amps?)
-        //
-        // next_instructions
     }
 
     /// Compute `SchedulingPrio` for a given `signal` located in the `subarray`
