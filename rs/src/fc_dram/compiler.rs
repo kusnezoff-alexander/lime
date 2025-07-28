@@ -880,7 +880,10 @@ mod tests {
         INIT.call_once(|| {
             env_logger::init();
         });
-        Compiler::new(CompilerSettings { print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, repetition_fracops: 5, safe_space_rows_per_subarray: 16, config_file: CString::new("").expect("CString::new failed").as_ptr(), do_save_config: true} )
+        Compiler::new(CompilerSettings {
+            print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, repetition_fracops: 5, safe_space_rows_per_subarray: 16,
+            config_file:  CString::new("/home/alex/Documents/Studium/Sem6/inf_pm_fpa/lime-fork/config/fcdram_hksynx.toml").unwrap().as_ptr(),
+            do_save_config: false } )
     }
 
     #[test]
@@ -888,10 +891,31 @@ mod tests {
 
         let mut compiler = init();
         let mut egraph: EGraph<AoigLanguage, ()> = Default::default();
-        egraph.add_expr(&my_expression);
-        let out = egraph.add(AoigLanguage::OR([eggmock::egg::Id::from(0), eggmock::egg::Id::from(2)])); // additional `And` with one src-operand=input and one non-input src operand
-        debug!("EGraph used for candidate-init: {:?}", egraph);
-        let egraph_clone = egraph.clone();
+
+        // Create Input nodes
+        let id1 = egraph.add(AoigLanguage::Input(0)); // Id(1)
+        let id2 = egraph.add(AoigLanguage::Input(1)); // Id(2)
+        let id3 = egraph.add(AoigLanguage::Input(2)); // Id(3)
+
+        // And([Signal(false, Id(2)), Signal(false, Id(3))]) → Id(4)
+        let id4 = egraph.add(AoigLanguage::And([id2, id3]));
+
+        // And([Signal(false, Id(1)), Signal(true, Id(3))]) → Id(6)
+        let not_id3 = egraph.add(AoigLanguage::Not(id3));
+        let id6 = egraph.add(AoigLanguage::And([id1, not_id3]));
+
+        // Or([Signal(false, Id(4)), Signal(false, Id(6))]) → Id(10)
+        let id10 = egraph.add(AoigLanguage::Or([id4, id6]));
+
+        let extractor = Extractor::new( &egraph, CompilingCostFunction {});
+        let ntk = &(extractor, vec!(id10));
+        ntk.dump();
+
+        let ntk_with_backward_edges = ntk.with_backward_edges();
+
+        let program = compiler.compile(&ntk_with_backward_edges);
+
+        println!("{program}");
     }
 
     #[test]

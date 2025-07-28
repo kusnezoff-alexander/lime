@@ -427,7 +427,13 @@ impl Display for Instruction {
         let description = match self {
             Instruction::FracOp(row) => format!("AP({})", display_row(row)),
             Instruction::ApaNOT(row1,row2) => format!("APA_NOT({},{})", display_row(row1), display_row(row2)),
-            Instruction::ApaAndOr(row1,row2) => format!("APA_AND_OR({},{}) // activates {:?}", display_row(row1), display_row(row2), ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(row1.local_rowaddress_to_subarray_id(SubarrayId(0)),row2.local_rowaddress_to_subarray_id(SubarrayId(0))))),
+            Instruction::ApaAndOr(row1,row2) => {
+                let (src_array, dst_array) = (row1.get_subarray_id(), row2.get_subarray_id());
+                let activated_rows: Vec<RowAddress> =  ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(row1.local_rowaddress_to_subarray_id(SubarrayId(0)),row2.local_rowaddress_to_subarray_id(SubarrayId(0)))).unwrap()
+                    .iter().flat_map(|row| vec!(row.local_rowaddress_to_subarray_id(src_array), row.local_rowaddress_to_subarray_id(dst_array)))
+                    .collect();
+                format!("APA_AND_OR({},{}) // activates {:?}", display_row(row1), display_row(row2), activated_rows)
+            },
             Instruction::RowCloneFPM(row1, row2, comment) => format!("AA({},{}) // {}", display_row(row1), display_row(row2), comment),
         };
         write!(f, "{}", description)

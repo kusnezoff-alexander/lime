@@ -159,6 +159,7 @@ mod tests {
     use crate::fc_dram::CompilerSettings;
 
     use super::*;
+    use std::ffi::CString;
     // import all elements from parent-module
     use std::sync::Once;
 
@@ -168,7 +169,10 @@ mod tests {
         INIT.call_once(|| {
             env_logger::init();
         });
-        Compiler::new(CompilerSettings { print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, repetition_fracops: 5, safe_space_rows_per_subarray: 16 } )
+        Compiler::new(CompilerSettings {
+            print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, repetition_fracops: 5, safe_space_rows_per_subarray: 16,
+            config_file:  CString::new("/home/alex/Documents/Studium/Sem6/inf_pm_fpa/lime-fork/config/fcdram_hksynx.toml").unwrap().as_ptr(),
+            do_save_config: false } )
     }
 
     /// TODO !
