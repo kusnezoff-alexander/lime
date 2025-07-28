@@ -176,8 +176,9 @@ impl Compiler {
         for subarray in 0..NR_SUBARRAYS {
             for constant in Self::CONSTANTS {
                 let next_free_row = self.comp_state.free_rows_per_subarray.get_mut(&SubarrayId(subarray)).and_then(|v| v.pop()).expect("No free rows in subarray {subarray} :(");
-                self.comp_state.constant_values.insert(constant, next_free_row);
+                self.comp_state.constant_values.insert(constant, next_free_row.local_rowaddress_to_subarray_id(SubarrayId(0)));
                 self.comp_state.dram_state.insert(next_free_row, RowState { is_compute_row: false, live_value: None, constant: Some(constant)} );
+                program.constants_row_placement.insert(constant, next_free_row);
             }
         }
     }
@@ -278,8 +279,8 @@ impl Compiler {
 
     /// Initialize compilation state:
     /// - choose compute rows (by setting [`Self::compute_row_activations`]
+    /// - decide in which rows to place constants
     /// - assign subarray-ids to each NodeId
-    /// - initialize [`Self::comp_state::free_rows_per_subarray`] with the rows that are free to be used for placing constants, inputs and intermediate values (when execution has started)
     /// - return code to place input operands in `program`
     fn init_comp_state(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>, program: &mut Program) {
         let config_file = unsafe { CStr::from_ptr(self.settings.config_file) }.to_str().unwrap();
@@ -335,7 +336,7 @@ impl Compiler {
         // 0.2 Save free rows
         // At the start all rows, except for the compute rows, are free rows
         let compute_rows = self.compute_row_activations.values().fold(vec!(), |all_compute_rows, next_compute_row_combi| {
-            let new_compute_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(next_compute_row_combi).expect("Compute row cant be activated??");
+            let new_compute_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(next_compute_row_combi).expect("Compute row can't be activated??");
             all_compute_rows.iter().chain(new_compute_rows).cloned().collect()
         });
         let mut free_rows = (0..ROWS_PER_SUBARRAY).map(RowAddress::from).collect::<Vec<RowAddress>>();
@@ -880,6 +881,17 @@ mod tests {
             env_logger::init();
         });
         Compiler::new(CompilerSettings { print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, repetition_fracops: 5, safe_space_rows_per_subarray: 16, config_file: CString::new("").expect("CString::new failed").as_ptr(), do_save_config: true} )
+    }
+
+    #[test]
+    fn test_input_placement () {
+
+        let mut compiler = init();
+        let mut egraph: EGraph<AoigLanguage, ()> = Default::default();
+        egraph.add_expr(&my_expression);
+        let out = egraph.add(AoigLanguage::OR([eggmock::egg::Id::from(0), eggmock::egg::Id::from(2)])); // additional `And` with one src-operand=input and one non-input src operand
+        debug!("EGraph used for candidate-init: {:?}", egraph);
+        let egraph_clone = egraph.clone();
     }
 
     #[test]

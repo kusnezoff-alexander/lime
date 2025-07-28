@@ -13,7 +13,7 @@ pub struct Program {
     pub instructions: Vec<Instruction>,
     /// Specifies in which rows constants have to be placed (!have to be placed in EVERY subarray)
     /// - TODO: adjust this to only place in subarrays which are actually used as reference subarrays during program execution
-    pub constants_row_placement: HashMap<Signal, Vec<RowAddress>>,
+    pub constants_row_placement: HashMap<usize, RowAddress>,
     /// Specifies where row-operands should be placed prior to calling this program
     /// (This is a convention which tells the user of this lib where the data should be placed within the DRAM before executing this program)
     /// - NOTE: Signals might have to be placed in several subarrays (REMINDER: movement in btw subarrays is not supported by FCDRAM)
@@ -53,6 +53,11 @@ impl Display for Program {
         writeln!(f, "Input operand placement:")?;
         for (signal, rows) in &self.input_row_operands_placement {
             writeln!(f, "{:?} in {}", signal, display_rows(rows.to_vec()))?;
+        }
+        writeln!(f, "---------------------------------------")?;
+        writeln!(f, "Constant operand placement:")?;
+        for (constant, row) in &self.constants_row_placement {
+            writeln!(f, "{} in {}", constant, display_row(&row.local_rowaddress_to_subarray_id(super::architecture::SubarrayId(0))))?;
         }
         writeln!(f, "---------------------------------------")?;
 

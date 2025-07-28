@@ -44,14 +44,17 @@ use architecture::*;
 /// TODO: adjust rewriting rules to FCDRAM (=AND/OR related rewrites like De-Morgan?)
 static REWRITE_RULES: LazyLock<Vec<Rewrite<AoigLanguage, ()>>> = LazyLock::new(|| {
     let rules = vec![
-        rewrite!("commute-and"; "(and ?a ?b)" => "(and ?b ?a)"),
-        rewrite!("and-1"; "(and ?a 1)" => "?a"),
-        rewrite!("and-0"; "(and ?a 0)" => "0"),
+        // TODO: sth is wrong with these rewrite rules - they produce a non-equivalent logic network !
+        // rewrite!("commute-and"; "(and ?a ?b)" => "(and ?b ?a)"),
+        // rewrite!("and-1"; "(and ?a 1)" => "?a"),
+        // rewrite!("and-0"; "(and ?a 0)" => "0"),
+        // rewrite!("or-1"; "(or ?a 1)" => "1"),
+        // rewrite!("or-0"; "(or ?a 0)" => "?a"),
 
         rewrite!("and-or"; "(! (or (! ?a) (! ?b)))" => "(and ?a ?b)"), // (De-Morgan)
         rewrite!("or-and"; "(! (and (! ?a) (! ?b)))" => "(or ?a ?b)" ), // (De-Morgan)
-        rewrite!("and-or-more-not"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan)
-        rewrite!("or-and-more-not"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan)
+        // rewrite!("and-or-more-not"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan)
+        // rewrite!("or-and-more-not"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan)
         rewrite!("and-same"; "(and ?a ?a)" => "?a"),
         rewrite!("not_not"; "(! (! ?a))" => "?a"),
 
