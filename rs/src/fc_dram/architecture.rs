@@ -434,7 +434,7 @@ impl Display for Instruction {
                     .collect();
                 format!("APA_AND_OR({},{}) // activates {:?}", display_row(row1), display_row(row2), activated_rows)
             },
-            Instruction::RowCloneFPM(row1, row2, comment) => format!("AA({},{}) // {}", display_row(row1), display_row(row2), comment),
+            Instruction::RowCloneFPM(row1, row2, comment) => format!("AAP({},{}) // {}", display_row(row1), display_row(row2), comment),
         };
         write!(f, "{}", description)
     }
