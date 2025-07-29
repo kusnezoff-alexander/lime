@@ -451,7 +451,7 @@ impl Instruction {
             // TODO: change to ns (t_{RAS}+6ns) - `t_{RAS}` to mem cycles
             Instruction::ApaNOT(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
             Instruction::ApaAndOr(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
-            Instruction::RowCloneFPM(_, _, _) => 2,    // see [4] Chap3.2
+            Instruction::RowCloneFPM(_, _, _) => 2,    // see [4] Chap3.2 (TODO: not correct, given as 90ns?)
         }
     }
 
