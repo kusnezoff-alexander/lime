@@ -127,7 +127,7 @@ fn compiling_receiver<'a>(
                         Extractor::new(
                             graph,
                             CompilingCostFunction {},
-                        ), // TODO: provide CostFunction !!
+                        ),
                         "t_extractor", settings.print_compilation_stats
                     );
                     debug!("Outputs: {outputs:?}");

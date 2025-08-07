@@ -124,7 +124,6 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                     mem_cycles: mem_cycles_or,
                 }
             },
-            // TODO: increase cost of NOT? (since it moves the value to another subarray!)
             // eg prefer `OR(a,b)` to `NOT(AND( NOT(a), NOT(b)))`
             AoigLanguage::Not(_) => {
                 let mem_cycles_not  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::NOT)
