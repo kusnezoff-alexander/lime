@@ -7,8 +7,8 @@ use eggmock::{Id, Mig, NetworkWithBackwardEdges, Node, Signal};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::max;
 
-pub struct CompilationState<'a, 'n, N> {
-    network: &'n N,
+pub struct CompilationState<'a, 'n, P> {
+    network: &'n P,
     /// contains all not yet computed network nodes that can be immediately computed (i.e. all
     /// inputs of the node are already computed)
     candidates: FxHashSet<(Id, Mig)>,
@@ -87,16 +87,6 @@ pub fn compile<'a>(
     let mut program = state.program.into();
     optimize(&mut program);
     Ok(program)
-}
-
-pub struct CompilationState<'a, 'n, P> {
-    network: &'n P,
-    /// Network-Nodes whose inputs all have been computed
-    candidates: FxHashSet<(Id, Mig)>,
-    program: ProgramState<'a>,
-
-    outputs: FxHashMap<Id, (u64, Signal)>,
-    leftover_use_count: FxHashMap<Id, usize>,
 }
 
 impl<'a, 'n, P: NetworkWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, P> {
