@@ -89,12 +89,24 @@ pub fn compile<'a>(
     Ok(program)
 }
 
-impl<'a, 'n, N: NetworkWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, N> {
-    pub fn new(architecture: &'a Architecture, network: &'n N) -> Self {
+pub struct CompilationState<'a, 'n, P> {
+    network: &'n P,
+    /// Network-Nodes whose inputs all have been computed
+    candidates: FxHashSet<(Id, Mig)>,
+    program: ProgramState<'a>,
+
+    outputs: FxHashMap<Id, (u64, Signal)>,
+    leftover_use_count: FxHashMap<Id, usize>,
+}
+
+impl<'a, 'n, P: NetworkWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, P> {
+    /// - `candidates`: , computed from `network
+    /// - `outputs`: direktly read-out from `network`
+    pub fn new(architecture: &'a Architecture, network: &'n P) -> Self {
         let mut candidates = FxHashSet::default();
-        // check all parents of leafs whether they have only leaf children, in which case they are
+        // check all parents of leaves whether they have only leaf children, in which case they are
         // candidates
-        for leaf in network.leafs() {
+        for leaf in network.leaves() {
             for candidate_id in network.node_outputs(leaf) {
                 let candidate = network.node(candidate_id);
                 if candidate
