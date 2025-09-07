@@ -6,18 +6,18 @@
 //!
 //! - [`Compiler::compile()`] = main function - compiles given logic network for the given [`architecture`] into a [`program`] using some [`optimization`]
 
-use crate::fc_dram::architecture::ROWS_PER_SUBARRAY;
+use crate::fc_dram::architecture::{Instruction, ROWS_PER_SUBARRAY};
 
 use super::{
-    architecture::{subarrayid_to_subarray_address, Instruction, LogicOp, NeighboringSubarrayRelPosition, SubarrayId, SupportedNrOperands, ARCHITECTURE, NR_SUBARRAYS, ROW_ID_BITMASK, SUBARRAY_ID_BITMASK}, optimization::optimize, CompilerSettings, Program, RowAddress
+    architecture::{LogicOp, NeighboringSubarrayRelPosition, SubarrayId, SupportedNrOperands, ARCHITECTURE, NR_SUBARRAYS, ROW_ID_BITMASK}, CompilerSettings, Program, RowAddress
 };
 use eggmock::{Aoig, Id, NetworkWithBackwardEdges, Node, Signal};
-use itertools::Itertools;
 use log::debug;
 use priority_queue::PriorityQueue;
 use strum::IntoEnumIterator;
-use toml::{Table, Value};
-use std::{cmp::Ordering, collections::{HashMap, HashSet}, env::consts::ARCH, ffi::CStr, fmt::Debug, fs, path::Path, vec};
+use std::{cmp::Ordering, collections::HashMap, ffi::CStr, fmt::Debug, fs::{self, File}, io::Write, path::Path, vec};
+
+use serde::{Serialize, Deserialize};
 
 /// Provides [`Compiler::compile()`] to compile a logic network into a [`Program`]
 pub struct Compiler {
@@ -34,6 +34,14 @@ pub struct Compiler {
     signal_to_subarrayids: HashMap<Signal, Vec<SubarrayId>>,
     /// see [`Self::get_all_noninverted_src_signals`]. First `Vec<Signal>`=noninverted src signals, 2nd `Vec<Signal>`=inverted src signals
     computed_noninverted_scr_signals: HashMap<Signal, (Vec<Signal>,Vec<Signal>)>,
+}
+
+/// Serializable struct for storing chosen compute rows in a json file
+#[derive(Serialize,Deserialize)]
+struct ComputeRowRecord {
+    operands: SupportedNrOperands,
+    position: NeighboringSubarrayRelPosition,
+    rows: (RowAddress, RowAddress),
 }
 
 impl Compiler {
@@ -91,9 +99,6 @@ impl Compiler {
                 debug!("New candidates: {:?}", new_candidates);
 
                 self.comp_state.candidates.extend(new_candidates);
-
-                // TODO: move result into a free row
-                // TODO: mark rows containing non-live values as free
         }
 
         debug!("Instructions: {:?}", program.instructions);
@@ -142,7 +147,6 @@ impl Compiler {
                             // move subarray to 1st subarray (instead of 0th, which is at the edge and hence has no sense-amps above)
                             let subarray1_id = ((ROW_ID_BITMASK << 1) | 1) ^ ROW_ID_BITMASK;
                             let row =  RowAddress(subarray1_id | row.0); // makes sure that `get_distance_of_row_to_sense_amps` doesn't panic since SRA returns subarray=0 by default (which is an edge subarray)
-                            println!("{:b}", row.0);
                             (ARCHITECTURE.get_distance_of_row_to_sense_amps)(row, sense_amp_position) as u64
                         }).sum()
                     };
@@ -152,7 +156,6 @@ impl Compiler {
                         activated_rows.iter().map(|&row| {
                             let subarray1_id = ((ROW_ID_BITMASK << 1) | 1) ^ ROW_ID_BITMASK;
                             let row =  RowAddress(subarray1_id | row.0); // makes sure that `get_distance_of_row_to_sense_amps` doesn't panic since SRA returns subarray=0 by default (which is an edge subarray)
-                            println!("{:b}", row.0);
                             (ARCHITECTURE.get_distance_of_row_to_sense_amps)(row, sense_amp_position) as u64
                         }).sum()
                     };
@@ -287,52 +290,66 @@ impl Compiler {
     fn init_comp_state(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>, program: &mut Program) {
         let config_file = unsafe { CStr::from_ptr(self.settings.config_file) }.to_str().unwrap();
         let config = Path::new(config_file);
-        println!("{:?}", config);
 
         // 0.1 Allocate compute rows: rows reserved for performing computations, all other rows are usable as "Register"
         if config.is_file() {
+            // if config-file has been provided: get compute rows from that config file rather than recomputing them
 
-            // let content = fs::read_to_string(config).unwrap();
-            // let value = content.parse::<toml::Table>().unwrap(); // Parse into generic TOML Value :contentReference[oaicite:1]{index=1}
-            //
-            // if let Some(arr) = value.get("safe_space_rows").and_then(|v| v.as_array()) {
-            //     println!("Found array of length {}", arr.len());
-            //         self.safe_space_rows = arr.iter().map(|v| {
-            //             v.as_integer().expect("Expected integer") as u64
-            //         }).collect();
-            // } else {
-            //     panic!("Config file doesn't contain value for safe-space-rows");
-            // }
+            let contents = fs::read_to_string(config).unwrap();
+            // Read file contents
 
-            // TODO: read&write this to&from config-file (added manually here in the meantiem)
-            self.compute_row_activations = HashMap::from([
-                ((SupportedNrOperands::One, NeighboringSubarrayRelPosition::Above), (RowAddress(8), RowAddress(8))),
-                ((SupportedNrOperands::One, NeighboringSubarrayRelPosition::Below), (RowAddress(303), RowAddress(303))),
-                ((SupportedNrOperands::Two, NeighboringSubarrayRelPosition::Above), (RowAddress(15), RowAddress(79))),
-                ((SupportedNrOperands::Two, NeighboringSubarrayRelPosition::Below), (RowAddress(293), RowAddress(357))),
-                ((SupportedNrOperands::Four, NeighboringSubarrayRelPosition::Above), (RowAddress(60), RowAddress(42))),
-                ((SupportedNrOperands::Four, NeighboringSubarrayRelPosition::Below), (RowAddress(472), RowAddress(412))),
-                ((SupportedNrOperands::Eight, NeighboringSubarrayRelPosition::Above), (RowAddress(42), RowAddress(15))),
-                ((SupportedNrOperands::Eight, NeighboringSubarrayRelPosition::Below), (RowAddress(203), RowAddress(283))),
-                ((SupportedNrOperands::Sixteen, NeighboringSubarrayRelPosition::Above), (RowAddress(32), RowAddress(83))),
-                ((SupportedNrOperands::Sixteen, NeighboringSubarrayRelPosition::Below), (RowAddress(470), RowAddress(252))),
-                ((SupportedNrOperands::Thirtytwo, NeighboringSubarrayRelPosition::Above), (RowAddress(307), RowAddress(28))),
-                ((SupportedNrOperands::Thirtytwo, NeighboringSubarrayRelPosition::Below), (RowAddress(149), RowAddress(318))),
-            ]);
+            // Parse JSON into Vec<RowActivationRecord>
+            let records: Vec<ComputeRowRecord> =
+                serde_json::from_str(&contents).unwrap_or_else(|_| panic!("Failed to parse JSON for file {:?}", config.to_str()));
+
+            // Convert into the HashMap structure
+            self.compute_row_activations = records
+                .into_iter()
+                .map(|rec| {
+                    (
+                        (rec.operands, rec.position),
+                        (rec.rows.0, rec.rows.1),
+                    )
+                })
+            .collect();
+
+            // This is the result for SKHYNIX DRAM (comment out if to save dev-time generating json-file):
+            // self.compute_row_activations = HashMap::from([
+            //     ((SupportedNrOperands::One, NeighboringSubarrayRelPosition::Above), (RowAddress(8), RowAddress(8))),
+            //     ((SupportedNrOperands::One, NeighboringSubarrayRelPosition::Below), (RowAddress(303), RowAddress(303))),
+            //     ((SupportedNrOperands::Two, NeighboringSubarrayRelPosition::Above), (RowAddress(15), RowAddress(79))),
+            //     ((SupportedNrOperands::Two, NeighboringSubarrayRelPosition::Below), (RowAddress(293), RowAddress(357))),
+            //     ((SupportedNrOperands::Four, NeighboringSubarrayRelPosition::Above), (RowAddress(60), RowAddress(42))),
+            //     ((SupportedNrOperands::Four, NeighboringSubarrayRelPosition::Below), (RowAddress(472), RowAddress(412))),
+            //     ((SupportedNrOperands::Eight, NeighboringSubarrayRelPosition::Above), (RowAddress(42), RowAddress(15))),
+            //     ((SupportedNrOperands::Eight, NeighboringSubarrayRelPosition::Below), (RowAddress(203), RowAddress(283))),
+            //     ((SupportedNrOperands::Sixteen, NeighboringSubarrayRelPosition::Above), (RowAddress(32), RowAddress(83))),
+            //     ((SupportedNrOperands::Sixteen, NeighboringSubarrayRelPosition::Below), (RowAddress(470), RowAddress(252))),
+            //     ((SupportedNrOperands::Thirtytwo, NeighboringSubarrayRelPosition::Above), (RowAddress(307), RowAddress(28))),
+            //     ((SupportedNrOperands::Thirtytwo, NeighboringSubarrayRelPosition::Below), (RowAddress(149), RowAddress(318))),
+            // ]);
 
 
         } else {
             self.choose_compute_rows(); // choose which rows will serve as compute rows (those are stored in `self.compute_row_activations`
-            println!("{:?}", self.compute_row_activations);
 
-            // TODO: write chosen compute rows to config-file
-            // let safe_space_rows_toml = Value::Array(self.safe_space_rows.iter().map(
-            //     |row| Value::Integer(*row as i64)
-            // ).collect());
-            // let config_in_toml = toml::toml! {
-            //     safe_space_rows = safe_space_rows_toml
-            // };
-            // fs::write(config, config_in_toml.to_string()).expect("Sth went wrong here..");
+            // write chosen compute rows to config-file
+            let records: Vec<ComputeRowRecord> = self.compute_row_activations
+                .iter()
+                .map(|((operands, position), (row1, row2))| ComputeRowRecord {
+                    operands: *operands,
+                    position: *position,
+                    rows: (*row1, *row2),
+                })
+            .collect();
+
+            // Store compute-row choice in json file
+            let json_output = serde_json::to_string_pretty(&records).unwrap();
+            // Write to file
+            let output_path = Path::new("fcdram_hksynx_compute_rows.json"); // NOTE: the chosen compute rows are specific to HKSYNX DRAM for now
+            let mut file = File::create(output_path).expect("Failed to create output file");
+            file.write_all(json_output.as_bytes()).expect("Failed to write JSON to file");
+            println!("Stored chosen compute-rows into {:?}. Pass this file via `.config_file` to safe considerate compilation time for choosing the compute rows", output_path.to_str());
         }
 
         // 0.2 Save free rows
@@ -395,7 +412,7 @@ impl Compiler {
 
             let (noninverted_src_signals, inverted_src_signals) = self.get_all_noninverted_and_inverted_src_signals(output, network);
 
-            println!("Noninverted src signals: {:?}", noninverted_src_signals.clone());
+            // println!("Noninverted src signals: {:?}", noninverted_src_signals.clone());
             // all directly (might in theory) reside in the same subarray as `output` (since no NOTS are inbtw which locate them to a neighboring subarray)
             for connected_signal in noninverted_src_signals {
                 self.signal_to_subarrayids.entry(connected_signal).or_default().push(actual_subarray); // determine (virtual) subarray in which output will reside
@@ -413,8 +430,8 @@ impl Compiler {
                 .filter(|signal| !network.node(signal.node_id()).is_leaf() ) // leaves don't need to be placed in neighboring subarray since inputs are placed by user
                 .map(|signal| Signal::new(signal.node_id(), false)).collect(); // before negation the signals are in the neighboring subarray
             while !unvisited_signals_in_same_subarray.is_empty() || !unvisited_signals_in_neighboring_subarray.is_empty() {
-                println!("Same subarray: {:?}", unvisited_signals_in_same_subarray);
-                println!("Neighboring subarray: {:?}", unvisited_signals_in_neighboring_subarray);
+                // println!("Same subarray: {:?}", unvisited_signals_in_same_subarray);
+                // println!("Neighboring subarray: {:?}", unvisited_signals_in_neighboring_subarray);
                 if let Some(signal_neighboring_subarray) = unvisited_signals_in_neighboring_subarray.pop() {
 
                     debug!("Neighboring: {signal_neighboring_subarray:?}");
@@ -623,8 +640,6 @@ impl Compiler {
 
     /// Returns Instructions to execute given `next_candidate` (which is a signal which needs to reside in a specific subarray after performing the execution)
     /// - [ ] make sure that operation to be executed on those rows won't simultaneously activate other rows holding valid data which will be used by future operations
-    ///
-    /// TODO: NEXT
     fn execute_next_instruction(&mut self, next_candidate: &(Signal, SubarrayId), network: &impl NetworkWithBackwardEdges<Node = Aoig>) -> Vec<Instruction> {
         let (signal, result_subarray) = next_candidate;
         let node_id = signal.node_id();
@@ -639,7 +654,7 @@ impl Compiler {
 
         let compute_subarray = if signal.is_inverted() { result_subarray.get_partner_subarray() } else { *result_subarray }; // for inverted signals first compute the noninverted signal in the other subarray
 
-        println!("EXECUTING {:?}", next_candidate);
+        // println!("EXECUTING {:?}", next_candidate);
         next_instructions.append(&mut self.execute_and_or(node_id, compute_subarray, network));
 
         // 2. Negate the result (if needed)
@@ -804,7 +819,7 @@ mod tests {
         });
         Compiler::new(CompilerSettings {
             print_program: true, verbose: true, print_compilation_stats: false, min_success_rate: 0.999, repetition_fracops: 5, safe_space_rows_per_subarray: 16,
-            config_file:  CString::new("/home/alex/Documents/Studium/Sem6/inf_pm_fpa/lime-fork/config/fcdram_hksynx.toml").unwrap().as_ptr(),
+            config_file:  CString::new("<your-path-to>/config/fcdram_hksynx_compute_rows.json").unwrap().as_ptr(),
             do_save_config: false } )
     }
 
@@ -905,6 +920,7 @@ mod tests {
 
     }
 
+    // TODO
     #[test]
     fn test_select_compute_and_ref_subarray() {
         let compiler = init();

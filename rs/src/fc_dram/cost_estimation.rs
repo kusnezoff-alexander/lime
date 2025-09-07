@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::ops;
 use std::rc::Rc;
 
-use super::architecture::{FCDRAMArchitecture, LogicOp, NeighboringSubarrayRelPosition, RowAddress, RowDistanceToSenseAmps, SuccessRate};
+use super::architecture::{FCDRAMArchitecture, LogicOp, SuccessRate};
 
 pub struct CompilingCostFunction{}
 
@@ -124,7 +124,6 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                     mem_cycles: mem_cycles_or,
                 }
             },
-            // TODO: increase cost of NOT? (since it moves the value to another subarray!)
             // eg prefer `OR(a,b)` to `NOT(AND( NOT(a), NOT(b)))`
             AoigLanguage::Not(_) => {
                 let mem_cycles_not  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::NOT)

@@ -6,7 +6,7 @@
 //! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of RowAddress
 
 use std::{cmp::Ordering, collections::{HashMap, HashSet}, fmt::{self, Display, Formatter}, ops, sync::LazyLock};
-use log::debug;
+use serde::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 
 pub const NR_SUBARRAYS: u64 = 2u64.pow(7);
@@ -21,7 +21,7 @@ pub fn subarrayid_to_subarray_address(subarray_id: SubarrayId) -> RowAddress {
 
 /// All Subarrays (except the ones at the edges) have two neighboring subarrays: one below (subarray_id+1) and one above (subarray_id-1)
 /// - currently the following subarrays are used together for computations: 0&1,2&3,4&5,..
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, Serialize, Deserialize)]
 pub enum NeighboringSubarrayRelPosition {
     /// `subarray_id-1`
     Above,
@@ -56,7 +56,7 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
     //      - see [3] Chap4.2: nr of Predecoders in LWLD determines number & addresses of simultaneously activated rows
     //  - does work for the example shown in [3] Chap3.2: `APA(256,287)` activates rows `287,286,281,280,263,262,257,256`
     // TODO: add overlapping of higher-order-bits (GWLD)
-    // TODO: init architecture a run-time, eg from config file
+    //      - at the moment high-order bits (=subarray-id) needs to be added manually using eg `subarrayid_to_subarray_address()` helper function
     // TODO: maybe evaluate statically?
     let get_activated_rows_from_apa = |row1: RowAddress, row2: RowAddress| -> Vec<RowAddress> {
         // 1. Define Predecoders by defining for which of the bits they're responsible
@@ -98,7 +98,6 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
     };
 
     // just a dummy implementation, see [5] Chap3.2 for details why determining the distance based on the Row Addresses issued by the MemController is difficult
-    // TODO: NEXT
     let get_distance_of_row_to_sense_amps = |row: RowAddress, subarray_rel_position: NeighboringSubarrayRelPosition| -> RowDistanceToSenseAmps {
         // NOTE: last & first subarrays only have sense-amps from one side
         if (row.get_subarray_id().0 == NR_SUBARRAYS-1 && subarray_rel_position == NeighboringSubarrayRelPosition::Below) || (row.get_subarray_id().0 == 0 && subarray_rel_position == NeighboringSubarrayRelPosition::Above) {
@@ -157,7 +156,7 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
 });
 
 /// - ! must be smaller than `rows_per_subarray * nr_subarrays` (this is NOT checked!)
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RowAddress(pub u64);
 
 impl RowAddress {
@@ -213,21 +212,6 @@ impl fmt::Display for SubarrayId {
     }
 }
 
-
-// impl Display for Vec<RowAddress> {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "[")?;
-//         let mut iter = self.iter();
-//         if let Some(first) = iter.next() {
-//             write!(f, "{}", first)?;
-//             for elem in iter {
-//                 write!(f, ",{}", elem)?;
-//             }
-//         }
-//         write!(f, "]")
-//     }
-// }
-
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct SuccessRate(pub f64);
 
@@ -266,24 +250,6 @@ impl ops::Mul<SuccessRate> for SuccessRate {
 impl From<f64> for SuccessRate {
     fn from(val: f64) -> Self {
         SuccessRate::new(val)
-    }
-}
-
-
-/// see Figure6,13 in [1] for timing diagrams
-/// - all numbers are specified in ns
-pub struct TimingSpec {
-    pub t_ras: f64,
-    /// Time btw an `PRE` and `ACT` when performing `APA` for issuing a `NOT`
-    pub time_btw_pre_act_apa_not: f64,
-}
-
-impl Default for TimingSpec {
-    fn default() -> Self {
-        todo!()
-        // TimingSpec {
-        //     t_ras:
-        // }
     }
 }
 
@@ -637,7 +603,7 @@ impl LogicOp {
 }
 
 /// Support operands numbers for AND/OR/NOT operations
-#[derive(Debug, Clone, Copy, EnumIter, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, EnumIter, Hash, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)] // You can change the representation (e.g., u8, u16, etc.)
 pub enum SupportedNrOperands {
     /// One operand only supported for `NOT`
@@ -684,18 +650,16 @@ pub trait RowDecoder {
 
     // TODO: get activation pattern for given rows r1,r2 (N:N vs N:2N) - or just check whether
     // N:2N: is supported and let `get_simultaneously_activated_rows_of_apa_op()` handle the rest?
+    // - NOTE: currenlty N:2N activation pattern is <u>not</u> supported
 }
 
-
-
+// TODO
 #[cfg(test)]
 mod tests {
 
     use super::*;
-    // fn init() {
-    // }
 
-    #[test] // mark function as test-fn
+    #[test]
     fn test_sra() {
         println!("{:?}", ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&SupportedNrOperands::try_from(8 as u8).unwrap()).unwrap().first());
     }
