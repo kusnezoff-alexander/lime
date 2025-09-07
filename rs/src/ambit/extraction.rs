@@ -1,5 +1,6 @@
 use super::{compile, Architecture};
-use eggmock::egg::{CostFunction, Id};
+use crate::opt_extractor::OptCostFunction;
+use eggmock::egg::{Analysis, EClass, Id, Language};
 use eggmock::{EggIdToSignal, Mig, MigLanguage, Network, NetworkLanguage, Signal};
 use either::Either;
 use rustc_hash::FxHashMap;
@@ -83,13 +84,23 @@ pub struct CompilingCost {
     program_cost: usize,
 }
 
-impl CostFunction<MigLanguage> for CompilingCostFunction<'_> {
+impl<A: Analysis<MigLanguage>> OptCostFunction<MigLanguage, A> for CompilingCostFunction<'_> {
     type Cost = Rc<CompilingCost>;
 
-    fn cost<C>(&mut self, enode: &MigLanguage, mut costs: C) -> Self::Cost
+    fn cost<C>(
+        &mut self,
+        eclass: &EClass<MigLanguage, A::Data>,
+        enode: &MigLanguage,
+        mut costs: C,
+    ) -> Option<Self::Cost>
     where
         C: FnMut(Id) -> Self::Cost,
     {
+        // detect self-cycles, other cycles will be detected by compiling, which will result in an
+        // error
+        if enode.children().contains(&eclass.id) {
+            return None;
+        }
         let root = enode.clone();
         let cost = match enode {
             MigLanguage::False | MigLanguage::Input(_) => CompilingCost::leaf(root),
@@ -106,16 +117,16 @@ impl CostFunction<MigLanguage> for CompilingCostFunction<'_> {
                     root,
                     iter::once((*id, cost)),
                     nesting,
-                )
+                )?
             }
             MigLanguage::Maj(children) => CompilingCost::with_children(
                 self.architecture,
                 root,
                 children.map(|id| (id, costs(id))),
                 NotNesting::NotANot,
-            ),
+            )?,
         };
-        Rc::new(cost)
+        Some(Rc::new(cost))
     }
 }
 
@@ -132,19 +143,21 @@ impl CompilingCost {
         root: MigLanguage,
         child_costs: impl IntoIterator<Item = (Id, Rc<CompilingCost>)>,
         not_nesting: NotNesting,
-    ) -> Self {
+    ) -> Option<Self> {
         let child_graphs = child_costs
             .into_iter()
             .map(|(id, cost)| cost.collapsed_graph(id));
         let partial_graph = StackedPartialGraph::new(root, child_graphs);
-        let program_cost = compile(architecture, &partial_graph.with_backward_edges())
-            .instructions
-            .len();
+        let program_cost = match compile(architecture, &partial_graph.with_backward_edges()) {
+            Err(_) => return None,
+            Ok(program) => program.instructions.len(),
+        };
         Self {
             partial: RefCell::new(Either::Left(partial_graph)),
             not_nesting,
             program_cost,
         }
+        .into()
     }
     pub fn collapsed_graph(&self, id: Id) -> Rc<CollapsedPartialGraph> {
         let mut partial = self.partial.borrow_mut();

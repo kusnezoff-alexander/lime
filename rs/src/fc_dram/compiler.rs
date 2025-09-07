@@ -156,6 +156,7 @@ impl Compiler {
                         activated_rows.iter().map(|&row| {
                             let subarray1_id = ((ROW_ID_BITMASK << 1) | 1) ^ ROW_ID_BITMASK;
                             let row =  RowAddress(subarray1_id | row.0); // makes sure that `get_distance_of_row_to_sense_amps` doesn't panic since SRA returns subarray=0 by default (which is an edge subarray)
+                            // println!("{:b}", row.0);
                             (ARCHITECTURE.get_distance_of_row_to_sense_amps)(row, sense_amp_position) as u64
                         }).sum()
                     };

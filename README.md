@@ -1,5 +1,7 @@
 # LIME: Optimizing Logic In Memory operations using E-Graphs
 
+This project is still work-in-progress.
+
 ## Running
 
 ```shell
@@ -9,9 +11,3 @@ cmake ..
 make lime
 ./lime
 ```
-
-## TODOs
-- Handle inverted output signals
-- Ensure monotonicity in extraction cost function
-- Think of better selection strategies all around
-- Optimize generated instructions (remove unnecessary spilling, merge AAPs and AP-AAP where possible)

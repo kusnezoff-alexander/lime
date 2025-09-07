@@ -3,7 +3,7 @@ use crate::ambit::program::{Address, BitwiseAddress, Instruction};
 use rustc_hash::FxHashSet;
 
 pub fn optimize(program: &mut Program) {
-    if program.instructions.len() == 0 {
+    if program.instructions.is_empty() {
         return;
     }
     let mut opt = Optimization { program };

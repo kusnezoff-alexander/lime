@@ -7,10 +7,21 @@ use eggmock::{Id, Mig, NetworkWithBackwardEdges, Node, Signal};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::max;
 
+pub struct CompilationState<'a, 'n, P> {
+    network: &'n P,
+    /// contains all not yet computed network nodes that can be immediately computed (i.e. all
+    /// inputs of the node are already computed)
+    candidates: FxHashSet<(Id, Mig)>,
+    program: ProgramState<'a>,
+
+    outputs: FxHashSet<Id>,
+    leftover_use_count: FxHashMap<Id, usize>,
+}
+
 pub fn compile<'a>(
     architecture: &'a Architecture,
     network: &impl NetworkWithBackwardEdges<Node = Mig>,
-) -> Program<'a> {
+) -> Result<Program<'a>, &'static str> {
     let mut state = CompilationState::new(architecture, network);
     let mut max_cand_size = 0;
     while !state.candidates.is_empty() {
@@ -38,18 +49,23 @@ pub fn compile<'a>(
             })
             .min_by_key(|(_, _, not_present, outputs, output)| (*not_present, *outputs, !output))
             .unwrap();
-        let output = state.outputs.get(&id).copied();
-        if let Some((output, signal)) = output {
-            if signal.is_inverted() {
-                state.compute(id, node, None);
-                state.program.signal_copy(
-                    signal,
-                    SingleRowAddress::Out(output),
-                    state.program.rows().get_free_dcc().unwrap_or(0),
-                );
-            } else {
-                state.compute(id, node, Some(Address::Out(output)));
+        if state.outputs.contains(&id) {
+            for (output, signal) in network.outputs().enumerate() {
+                if signal.node_id() != id {
+                    continue;
+                }
+                if signal.is_inverted() {
+                    state.compute(id, node, None);
+                    state.program.signal_copy(
+                        signal,
+                        SingleRowAddress::Out(output as u64),
+                        state.program.rows().get_free_dcc().unwrap_or(0),
+                    );
+                } else {
+                    state.compute(id, node, Some(Address::Out(output as u64)));
+                }
             }
+            state.outputs.remove(&id);
             let leftover_uses = *state.leftover_use_count(id);
             if leftover_uses == 1 {
                 state.program.free_id_rows(id);
@@ -58,19 +74,19 @@ pub fn compile<'a>(
             state.compute(id, node, None);
         }
     }
+    // outputs that are directly derived from inputs will not be computed by the loop above
+    // let's do that here
+    for (idx, output_sig) in network.outputs().enumerate() {
+        if !state.outputs.contains(&output_sig.node_id()) {
+            continue;
+        }
+        state
+            .program
+            .signal_copy(output_sig, SingleRowAddress::Out(idx as u64), 0);
+    }
     let mut program = state.program.into();
     optimize(&mut program);
-    program
-}
-
-pub struct CompilationState<'a, 'n, P> {
-    network: &'n P,
-    /// Network-Nodes whose inputs all have been computed
-    candidates: FxHashSet<(Id, Mig)>,
-    program: ProgramState<'a>,
-
-    outputs: FxHashMap<Id, (u64, Signal)>,
-    leftover_use_count: FxHashMap<Id, usize>,
+    Ok(program)
 }
 
 impl<'a, 'n, P: NetworkWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, P> {
@@ -93,13 +109,7 @@ impl<'a, 'n, P: NetworkWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, P
             }
         }
         let program = ProgramState::new(architecture, network);
-
-        let outputs = network
-            .outputs()
-            .enumerate()
-            .map(|(id, sig)| (sig.node_id(), (id as u64, sig)))
-            .collect();
-
+        let outputs = network.outputs().map(|sig| sig.node_id()).collect();
         Self {
             network,
             candidates,
@@ -111,7 +121,7 @@ impl<'a, 'n, P: NetworkWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, P
 
     pub fn leftover_use_count(&mut self, id: Id) -> &mut usize {
         self.leftover_use_count.entry(id).or_insert_with(|| {
-            self.network.node_outputs(id).count() + self.outputs.contains_key(&id) as usize
+            self.network.node_outputs(id).count() + self.outputs.contains(&id) as usize
         })
     }
 

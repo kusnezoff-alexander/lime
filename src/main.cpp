@@ -1,28 +1,32 @@
-#include "eggmock.h"
-
 #include "ambit.h"
 #include "fcdram.h"
 
 #include <mockturtle/io/write_dot.hpp>
 #include <mockturtle/networks/mig.hpp>
-#include <sys/types.h>
 
 using namespace mockturtle;
 using namespace eggmock;
 
 void run_ambit_example(mig_network in)
 {
-  ambit_compiler_statistics result = eggmock::send_mig( in, ambit_compile( ambit_compiler_settings{
-                                                           .print_program = true,
-                                                           .verbose = true,
-                                                       } ) );
-  // std::cout << "IC:" << result.instruction_count << std::endl;
-  // std::cout << "t1:" << result.t_runner << std::endl;
-  // std::cout << "t2:" << result.t_extractor << std::endl;
-  // std::cout << "t3:" << result.t_compiler << std::endl;
-  // mig_network rewritten = rewrite_mig( in, ambit_rewriter() );
-  // write_dot( rewritten, "out.dot" );
 
+  write_dot( in, "in.dot" );
+
+  const auto settings = ambit_compiler_settings{
+      .print_program = true,
+      .verbose = true,
+      .preoptimize = true,
+      .rewrite = true,
+  };
+
+  auto [out, result] = ambit_rewrite( settings, in );
+  std::cout << "IC:" << result.instruction_count << std::endl;
+  std::cout << "t1:" << result.t_runner << std::endl;
+  std::cout << "t2:" << result.t_extractor << std::endl;
+  std::cout << "t3:" << result.t_compiler << std::endl;
+
+  write_dot( out, "out.dot" );
+  // ambit_compiler_statistics result = eggmock::send_mig( in, ambit_compile(settings) );
 }
 
 /**
@@ -80,17 +84,17 @@ void run_fcdram_example()
 
 int main()
 {
-  // mig_network in;
-  // const auto b_i = in.create_pi();
-  // const auto b_i_next = in.create_pi();
-  // const auto m = in.create_pi();
-  //
-  // const auto O1 = in.create_and( m, b_i_next );
-  // const auto O2 = in.create_and( in.create_not( m ), b_i );
-  // const auto bi = in.create_or( O1, O2 );
-  // in.create_po( bi );
-  //
-  // write_dot( in, "in.dot" );
-  // run_ambit_example(in);
-  run_fcdram_example();
+  mig_network in;
+  const auto b_i = in.create_pi();
+  const auto b_i_next = in.create_pi();
+  const auto m = in.create_pi();
+
+  const auto O1 = in.create_and( m, b_i_next );
+  const auto O2 = in.create_and( in.create_not( m ), b_i );
+  const auto bi = in.create_or( O1, O2 );
+  in.create_po( bi );
+
+  write_dot( in, "in.dot" );
+  run_ambit_example(in);
+  // run_fcdram_example();
 }

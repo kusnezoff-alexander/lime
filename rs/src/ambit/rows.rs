@@ -66,12 +66,8 @@ impl<'a> Rows<'a> {
     }
 
     pub fn get_free_dcc(&self) -> Option<u8> {
-        for i in 0..self.architecture.num_dcc {
-            if self.rows.get(&Row::Bitwise(BitwiseRow::DCC(i))).is_none() {
-                return Some(i);
-            }
-        }
-        None
+        (0..self.architecture.num_dcc)
+            .find(|&i| !self.rows.contains_key(&Row::Bitwise(BitwiseRow::DCC(i))))
     }
 
     /// Returns the current signal of the given row.

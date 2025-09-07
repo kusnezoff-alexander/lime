@@ -10,10 +10,9 @@ use std::time::Instant;
 use self::compilation::compile;
 use self::extraction::CompilingCostFunction;
 
-use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
-use eggmock::{
-    Mig, MigLanguage, MigReceiverFFI, Network, Receiver, ReceiverFFI, Rewriter, RewriterFFI,
-};
+use crate::opt_extractor::{OptExtractionNetwork, OptExtractor};
+use eggmock::egg::{rewrite, EGraph, Rewrite, Runner};
+use eggmock::{Mig, MigLanguage, MigReceiverFFI, Network, Receiver, ReceiverFFI};
 use program::*;
 use rows::*;
 
@@ -80,7 +79,7 @@ static ARCHITECTURE: LazyLock<Architecture> = LazyLock::new(|| {
             ],
             vec![
                 DCC {
-                    index: 0,
+                    index: 1,
                     inverted: false,
                 },
                 T(0),
@@ -133,10 +132,7 @@ struct CompilerOutput<'a> {
     graph: EGraph<MigLanguage, ()>,
     #[borrows(graph)]
     #[covariant]
-    ntk: (
-        Extractor<'this, CompilingCostFunction<'a>, MigLanguage, ()>,
-        Vec<Id>,
-    ),
+    ntk: OptExtractionNetwork<OptExtractor<'this, CompilingCostFunction<'a>, MigLanguage, ()>>,
     #[borrows(ntk)]
     program: Program<'a>,
 }
@@ -146,15 +142,20 @@ fn compiling_receiver<'a>(
     rules: &'a [Rewrite<MigLanguage, ()>],
     settings: CompilerSettings,
 ) -> impl Receiver<Result = CompilingReceiverResult<'a>, Node = Mig> + 'a {
-    EGraph::<MigLanguage, _>::new(()).map(move |(graph, outputs)| {
-        let t_runner = std::time::Instant::now();
-        let runner = Runner::default().with_egraph(graph).run(rules);
-        let t_runner = t_runner.elapsed().as_millis();
-        if settings.verbose {
-            println!("== Runner Report");
-            runner.print_report();
-        }
-        let graph = runner.egraph;
+    EGraph::<MigLanguage, _>::new(()).map(move |(mut graph, outputs)| {
+        let t_runner = if settings.rewrite {
+            let t_runner = std::time::Instant::now();
+            let runner = Runner::default().with_egraph(graph).run(rules);
+            let t_runner = t_runner.elapsed().as_millis();
+            if settings.verbose {
+                println!("== Runner Report");
+                runner.print_report();
+            }
+            graph = runner.egraph;
+            t_runner
+        } else {
+            0
+        };
 
         let mut t_extractor = 0;
         let mut t_compiler = 0;
@@ -163,18 +164,14 @@ fn compiling_receiver<'a>(
             graph,
             |graph| {
                 let start_time = Instant::now();
-                let extractor = Extractor::new(
-                    &graph,
-                    CompilingCostFunction {
-                        architecture: &architecture,
-                    },
-                );
+                let extractor = OptExtractor::new(graph, CompilingCostFunction { architecture });
                 t_extractor = start_time.elapsed().as_millis();
-                (extractor, outputs)
+                OptExtractionNetwork(extractor, outputs)
             },
             |ntk| {
                 let start_time = Instant::now();
-                let program = compile(architecture, &ntk.with_backward_edges());
+                let program = compile(architecture, &ntk.with_backward_edges())
+                    .expect("network should be compilable");
                 t_compiler = start_time.elapsed().as_millis();
                 if settings.print_program || settings.verbose {
                     if settings.verbose {
@@ -205,32 +202,7 @@ fn compiling_receiver<'a>(
 struct CompilerSettings {
     print_program: bool,
     verbose: bool,
-}
-
-struct AmbitRewriter(CompilerSettings);
-
-impl Rewriter for AmbitRewriter {
-    type Node = Mig;
-    type Intermediate = CompilingReceiverResult<'static>;
-
-    fn create_receiver(
-        &mut self,
-    ) -> impl Receiver<Node = Mig, Result = CompilingReceiverResult<'static>> + 'static {
-        compiling_receiver(&*ARCHITECTURE, REWRITE_RULES.as_slice(), self.0)
-    }
-
-    fn rewrite(
-        self,
-        result: CompilingReceiverResult<'static>,
-        output: impl Receiver<Node = Mig, Result = ()>,
-    ) {
-        result.output.borrow_ntk().send(output);
-    }
-}
-
-#[no_mangle]
-extern "C" fn ambit_rewriter(settings: CompilerSettings) -> MigReceiverFFI<RewriterFFI<Mig>> {
-    RewriterFFI::new(AmbitRewriter(settings))
+    rewrite: bool,
 }
 
 #[repr(C)]
@@ -247,19 +219,36 @@ struct CompilerStatistics {
 }
 
 #[no_mangle]
-extern "C" fn ambit_compile(settings: CompilerSettings) -> MigReceiverFFI<CompilerStatistics> {
+extern "C" fn ambit_rewrite_ffi(
+    settings: CompilerSettings,
+    receiver: MigReceiverFFI<()>,
+) -> MigReceiverFFI<CompilerStatistics> {
     let receiver =
-        compiling_receiver(&*&ARCHITECTURE, REWRITE_RULES.as_slice(), settings).map(|res| {
-            let graph = res.output.borrow_graph();
-            CompilerStatistics {
-                egraph_classes: graph.number_of_classes() as u64,
-                egraph_nodes: graph.total_number_of_nodes() as u64,
-                egraph_size: graph.total_size() as u64,
-                instruction_count: res.output.borrow_program().instructions.len() as u64,
-                t_runner: res.t_runner as u64,
-                t_extractor: res.t_extractor as u64,
-                t_compiler: res.t_compiler as u64,
-            }
+        compiling_receiver(&ARCHITECTURE, REWRITE_RULES.as_slice(), settings).map(|res| {
+            res.output.borrow_ntk().send(receiver);
+            CompilerStatistics::from_result(res)
         });
     MigReceiverFFI::new(receiver)
+}
+
+#[no_mangle]
+extern "C" fn ambit_compile_ffi(settings: CompilerSettings) -> MigReceiverFFI<CompilerStatistics> {
+    let receiver = compiling_receiver(&ARCHITECTURE, REWRITE_RULES.as_slice(), settings)
+        .map(CompilerStatistics::from_result);
+    MigReceiverFFI::new(receiver)
+}
+
+impl CompilerStatistics {
+    fn from_result(res: CompilingReceiverResult) -> Self {
+        let graph = res.output.borrow_graph();
+        CompilerStatistics {
+            egraph_classes: graph.number_of_classes() as u64,
+            egraph_nodes: graph.total_number_of_nodes() as u64,
+            egraph_size: graph.total_size() as u64,
+            instruction_count: res.output.borrow_program().instructions.len() as u64,
+            t_runner: res.t_runner as u64,
+            t_extractor: res.t_extractor as u64,
+            t_compiler: res.t_compiler as u64,
+        }
+    }
 }

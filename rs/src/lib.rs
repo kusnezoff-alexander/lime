@@ -1,4 +1,5 @@
 #![allow(clippy::upper_case_acronyms)]
 
-pub mod ambit;
+mod ambit;
+mod opt_extractor;
 pub mod fc_dram;

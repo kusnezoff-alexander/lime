@@ -88,11 +88,10 @@ impl Instruction {
         &self,
         architecture: &'a Architecture,
     ) -> impl Iterator<Item = Row> + 'a {
-        let first = match self {
+        let first = *match self {
             Instruction::AP(a) => a,
             Instruction::AAP(a, _) => a,
-        }
-        .clone();
+        };
         let first = match first {
             Address::Bitwise(BitwiseAddress::Multiple(idx)) => {
                 architecture.multi_activations[idx].as_slice()
@@ -374,21 +373,21 @@ impl Display for Program<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let write_operand = |f: &mut Formatter<'_>, o: &BitwiseOperand| -> std::fmt::Result {
             match o {
-                BitwiseOperand::T(t) => write!(f, "T{}", t),
+                BitwiseOperand::T(t) => write!(f, "T{t}"),
                 BitwiseOperand::DCC { inverted, index } => {
                     if *inverted {
-                        write!(f, "~DCC{}", index)
+                        write!(f, "~DCC{index}")
                     } else {
-                        write!(f, "DCC{}", index)
+                        write!(f, "DCC{index}")
                     }
                 }
             }
         };
         let write_address = |f: &mut Formatter<'_>, a: &Address| -> std::fmt::Result {
             match a {
-                Address::In(i) => write!(f, "I{}", i),
-                Address::Out(i) => write!(f, "O{}", i),
-                Address::Spill(i) => write!(f, "S{}", i),
+                Address::In(i) => write!(f, "I{i}"),
+                Address::Out(i) => write!(f, "O{i}"),
+                Address::Spill(i) => write!(f, "S{i}"),
                 Address::Const(c) => write!(f, "C{}", if *c { "1" } else { "0" }),
                 Address::Bitwise(b) => match b {
                     BitwiseAddress::Single(o) => write_operand(f, o),
