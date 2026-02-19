@@ -171,7 +171,7 @@ impl Optimization<'_, '_> {
                 if let Instruction::AAP(Address::Bitwise(BitwiseAddress::Single(operand)), target) =
                     candidate
                 {
-                    if target
+                    if !target
                         .row_addresses(self.program.architecture)
                         .any(|addr| used_rows.contains(&addr.row()))
                         && operands.contains(&operand)
