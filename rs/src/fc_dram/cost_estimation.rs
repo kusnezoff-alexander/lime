@@ -100,7 +100,7 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                     mem_cycles: 1, // !=0 to ensure Cost-Function is *strictly monotonically increasing* (TODO: monotonicity isn"t needed here, right?")
                 }
             },
-            AoigLanguage::And(_) | AoigLanguage::And4(_) | AoigLanguage::And8(_) | AoigLanguage::And16(_) => {
+            AoigLanguage::And(_) | AoigLanguage::And2(_) | AoigLanguage::And4(_) | AoigLanguage::And8(_) | AoigLanguage::And16(_) | AoigLanguage::And32(_) => {
 
                 let mem_cycles_and  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::AND)
                     .iter().fold(0, |acc, instr| { acc + instr.get_nr_memcycles() as usize });
@@ -113,7 +113,7 @@ impl CostFunction<AoigLanguage> for CompilingCostFunction {
                 }
 
             },
-            AoigLanguage::Or(_) | AoigLanguage::Or4(_) | AoigLanguage::Or8(_) | AoigLanguage::Or16(_) => {
+            AoigLanguage::Or(_) | AoigLanguage::Or2(_) | AoigLanguage::Or4(_) | AoigLanguage::Or8(_) | AoigLanguage::Or16(_) | AoigLanguage::Or32(_) => {
                 let mem_cycles_or  = FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::OR)
                     .iter().fold(0, |acc, instr| { acc + instr.get_nr_memcycles() as usize });
                 debug!("Cycles OR: {}",  mem_cycles_or);

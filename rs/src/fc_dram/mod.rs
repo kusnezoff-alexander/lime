@@ -141,10 +141,10 @@ fn compiling_receiver<'a>(
                     debug!("Network outputs: {:?}", ntk.outputs().collect::<Vec<Signal>>());
                     ntk.dump();
                     let ntk_with_backward_edges = ntk.with_backward_edges();
-                    debug!("Network Leaves: {:?}", ntk_with_backward_edges.leaves().collect::<Vec<eggmock::Id>>());
+                    debug!("Network Leaves: {:?}", ntk_with_backward_edges.leafs().collect::<Vec<eggmock::Id>>());
                     debug!("Network Outputs of first leaf: {:?}",
                         ntk_with_backward_edges.node_outputs(
-                            ntk_with_backward_edges.leaves().next().unwrap()
+                            ntk_with_backward_edges.leafs().next().unwrap()
                         ).collect::<Vec<eggmock::Id>>()
                     );
 

@@ -95,6 +95,6 @@ int main()
   in.create_po( bi );
 
   write_dot( in, "in.dot" );
-  run_ambit_example(in);
-  // run_fcdram_example();
+  //run_ambit_example(in);
+  run_fcdram_example();
 }

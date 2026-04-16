@@ -195,7 +195,7 @@ impl Compiler {
     /// TODO: parititon logic network into subgraphs s.t. subgraphs can be mapped onto subarrays reducing nr of needed moves
     fn place_inputs(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>, program: &mut Program) {
 
-        for input in network.leaves().collect::<Vec<Id>>() {
+        for input in network.leafs().collect::<Vec<Id>>() {
             // check whether the signal is required in inverted or noninverted form and place it accordingly in all subarrays where it is needed
             let original_signal = Signal::new(input, false);
             let inverted_signal = Signal::new(input, true);
@@ -223,7 +223,7 @@ impl Compiler {
     /// Initialize candidates with all nodes that are computable
     /// NOTE: initially all nodes whose src-operands are primary inputs only are marked as candidates in <u>all</u> subarrays (since inputs are expected to be placed in all those subarrays by the user)
     fn init_candidates(&mut self, network: &impl NetworkWithBackwardEdges<Node = Aoig>) {
-        let inputs: Vec<Id> = network.leaves().collect();
+        let inputs: Vec<Id> = network.leafs().collect();
 
         // init candidates with all nodes having only inputs as src-operands
         for &input in inputs.as_slice() {
@@ -374,7 +374,7 @@ impl Compiler {
         debug!("Placed constants: {:?}", self.comp_state.constant_values);
 
         self.place_inputs(network, program); // place input-operands into rows
-        debug!("Placed inputs {:?} in {:?}", network.leaves().collect::<Vec<Id>>(), self.comp_state.value_states);
+        debug!("Placed inputs {:?} in {:?}", network.leafs().collect::<Vec<Id>>(), self.comp_state.value_states);
 
         // 0.5 Setup: store all network-nodes yet to be compiled
         self.init_candidates(network);
