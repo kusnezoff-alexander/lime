@@ -5,8 +5,14 @@
 //!
 //! RowAddress (eg via bit-shifting given bitmasks for subarray-id & row-addr to put on-top of RowAddress
 
-use std::{cmp::Ordering, collections::{HashMap, HashSet}, fmt::{self, Display, Formatter}, ops, sync::LazyLock};
 use log::debug;
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    fmt::{self, Display, Formatter},
+    ops,
+    sync::LazyLock,
+};
 use strum_macros::EnumIter;
 
 pub const NR_SUBARRAYS: u64 = 2u64.pow(7);
@@ -32,7 +38,10 @@ pub enum NeighboringSubarrayRelPosition {
 impl NeighboringSubarrayRelPosition {
     /// Get whether `subarray1` is above or below `relative_to`
     pub fn get_relative_position(subarray: &SubarrayId, relative_to: &SubarrayId) -> Self {
-        assert!((subarray.0 as isize - relative_to.0 as isize).abs() == 1, "Given Arrays are not neighboring arrays");
+        assert!(
+            (subarray.0 as isize - relative_to.0 as isize).abs() == 1,
+            "Given Arrays are not neighboring arrays"
+        );
         if subarray.0 > relative_to.0 {
             NeighboringSubarrayRelPosition::Below
         } else {
@@ -47,8 +56,10 @@ impl NeighboringSubarrayRelPosition {
 /// TODO: add field to simulate row-decoder circuitry, needed for impl Simultaneous-row-activation
 /// TODO: make this configurable at runtime
 pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
-
-    let mut row_activated_by_rowaddress_tuple: HashMap<RowAddress, HashSet<(RowAddress, RowAddress)>> = HashMap::new(); // for each row store which RowAddress-combinations activate it
+    let mut row_activated_by_rowaddress_tuple: HashMap<
+        RowAddress,
+        HashSet<(RowAddress, RowAddress)>,
+    > = HashMap::new(); // for each row store which RowAddress-combinations activate it
 
     // Implementation of the Hypothetical Row Decoder from [3] Chap4.2
     // - GWLD (Global Wordline Decoder)=decode higher bits to select addressed subarray
@@ -72,76 +83,119 @@ pub static ARCHITECTURE: LazyLock<FCDRAMArchitecture> = LazyLock::new(|| {
         // for each predecoder store which bits will remain set due to `APA(row1,row)`:
         let overlapping_bits = [
             // latches set by `ACT(row1)`  --- latches set by `ACT(row2)`
-            [ row1.0 & predecoder_bitmasks[0], row2.0 & predecoder_bitmasks[0]],
-            [ row1.0 & predecoder_bitmasks[1], row2.0 & predecoder_bitmasks[1]],
-            [ row1.0 & predecoder_bitmasks[2], row2.0 & predecoder_bitmasks[2]],
-            [ row1.0 & predecoder_bitmasks[3], row2.0 & predecoder_bitmasks[3]],
-            [ row1.0 & predecoder_bitmasks[4], row2.0 & predecoder_bitmasks[4]],
+            [
+                row1.0 & predecoder_bitmasks[0],
+                row2.0 & predecoder_bitmasks[0],
+            ],
+            [
+                row1.0 & predecoder_bitmasks[1],
+                row2.0 & predecoder_bitmasks[1],
+            ],
+            [
+                row1.0 & predecoder_bitmasks[2],
+                row2.0 & predecoder_bitmasks[2],
+            ],
+            [
+                row1.0 & predecoder_bitmasks[3],
+                row2.0 & predecoder_bitmasks[3],
+            ],
+            [
+                row1.0 & predecoder_bitmasks[4],
+                row2.0 & predecoder_bitmasks[4],
+            ],
         ];
 
-        let mut activated_rows  = vec!();       // TODO: get other activated rows and add them to `activated_rows`
-        // compute all simultaneously activated rows
+        let mut activated_rows = vec![]; // TODO: get other activated rows and add them to `activated_rows`
+                                         // compute all simultaneously activated rows
         for i in 0..1 << predecoder_bitmasks.len() {
-            let activated_row = overlapping_bits.iter()
+            let activated_row = overlapping_bits
+                .iter()
                 // start with all row-address bits unset (=0) and first predecoder stage (=1)
-                .fold((RowAddress(0), 1), |(row, predecoder_stage_onehot), new_row_bits|{
-                    let bitmask_to_choose = (i & predecoder_stage_onehot) > 0;
-                    (RowAddress(row.0 | new_row_bits[bitmask_to_choose as usize]), predecoder_stage_onehot << 1)
-                });
+                .fold(
+                    (RowAddress(0), 1),
+                    |(row, predecoder_stage_onehot), new_row_bits| {
+                        let bitmask_to_choose = (i & predecoder_stage_onehot) > 0;
+                        (
+                            RowAddress(row.0 | new_row_bits[bitmask_to_choose as usize]),
+                            predecoder_stage_onehot << 1,
+                        )
+                    },
+                );
             activated_rows.push(activated_row.0);
         }
         // debug!("`APA({row1},{row2})` activates the following rows simultaneously: {activated_rows:?}");
         activated_rows.dedup(); // no need for `.unique()` since this implementation adds equivalent RowAddresses one after the other (!check!!)
-                                 // NOTE: works in-place
-        // remove duplicate entries
-        activated_rows.into_iter().collect::<HashSet<_>>().into_iter().collect()
+                                // NOTE: works in-place
+                                // remove duplicate entries
+        activated_rows
+            .into_iter()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect()
     };
 
     // just a dummy implementation, see [5] Chap3.2 for details why determining the distance based on the Row Addresses issued by the MemController is difficult
     // TODO: NEXT
-    let get_distance_of_row_to_sense_amps = |row: RowAddress, subarray_rel_position: NeighboringSubarrayRelPosition| -> RowDistanceToSenseAmps {
-        // NOTE: last & first subarrays only have sense-amps from one side
-        if (row.get_subarray_id().0 == NR_SUBARRAYS-1 && subarray_rel_position == NeighboringSubarrayRelPosition::Below) || (row.get_subarray_id().0 == 0 && subarray_rel_position == NeighboringSubarrayRelPosition::Above) {
-            panic!("Edge subarrays have sense-amps only connected from one side");
-        }
+    let get_distance_of_row_to_sense_amps =
+        |row: RowAddress,
+         subarray_rel_position: NeighboringSubarrayRelPosition|
+         -> RowDistanceToSenseAmps {
+            // NOTE: last & first subarrays only have sense-amps from one side
+            if (row.get_subarray_id().0 == NR_SUBARRAYS - 1
+                && subarray_rel_position == NeighboringSubarrayRelPosition::Below)
+                || (row.get_subarray_id().0 == 0
+                    && subarray_rel_position == NeighboringSubarrayRelPosition::Above)
+            {
+                panic!("Edge subarrays have sense-amps only connected from one side");
+            }
 
-        let local_row_address= RowAddress(row.0 & ROW_ID_BITMASK);
+            let local_row_address = RowAddress(row.0 & ROW_ID_BITMASK);
 
-        let distance_to_above_subarray = match local_row_address {
-            i if i.0 < ROWS_PER_SUBARRAY / 2 / 3 => RowDistanceToSenseAmps::Close,   // 1st third  of subarray-half
-            i if i.0 < ROWS_PER_SUBARRAY / 2 / 6 => RowDistanceToSenseAmps::Middle,  // 2nd third  of subarray-half
-            _ => RowDistanceToSenseAmps::Far,                                           // everything else is treated as being far away
+            let distance_to_above_subarray = match local_row_address {
+                i if i.0 < ROWS_PER_SUBARRAY / 2 / 3 => RowDistanceToSenseAmps::Close, // 1st third  of subarray-half
+                i if i.0 < ROWS_PER_SUBARRAY / 2 / 6 => RowDistanceToSenseAmps::Middle, // 2nd third  of subarray-half
+                _ => RowDistanceToSenseAmps::Far, // everything else is treated as being far away
+            };
+
+            match subarray_rel_position {
+                NeighboringSubarrayRelPosition::Above => distance_to_above_subarray,
+                NeighboringSubarrayRelPosition::Below => distance_to_above_subarray.reverse(), // rows close to above subarray are far from below subarray etc
+            }
         };
-
-        match subarray_rel_position {
-            NeighboringSubarrayRelPosition::Above => distance_to_above_subarray,
-            NeighboringSubarrayRelPosition::Below => distance_to_above_subarray.reverse(), // rows close to above subarray are far from below subarray etc
-        }
-    };
 
     // precompute things based on given SRA (simultaneous row activation function)
     let mut precomputed_simultaneous_row_activations = HashMap::new();
     for i in 0..ROWS_PER_SUBARRAY {
-        precomputed_simultaneous_row_activations.insert((RowAddress(i),RowAddress(i)), vec!(RowAddress(i))); // special case: no other row is activated when executing `APA(r1,r1)`
-        for j in i+1..ROWS_PER_SUBARRAY {
+        precomputed_simultaneous_row_activations
+            .insert((RowAddress(i), RowAddress(i)), vec![RowAddress(i)]); // special case: no other row is activated when executing `APA(r1,r1)`
+        for j in i + 1..ROWS_PER_SUBARRAY {
             let activated_rows = get_activated_rows_from_apa(RowAddress(i), RowAddress(j));
-            precomputed_simultaneous_row_activations.insert((RowAddress(i),RowAddress(j)), activated_rows.clone());
-            precomputed_simultaneous_row_activations.insert((RowAddress(j),RowAddress(i)), activated_rows.clone());
+            precomputed_simultaneous_row_activations
+                .insert((RowAddress(i), RowAddress(j)), activated_rows.clone());
+            precomputed_simultaneous_row_activations
+                .insert((RowAddress(j), RowAddress(i)), activated_rows.clone());
 
             for row in activated_rows {
-                row_activated_by_rowaddress_tuple.entry(row)
+                row_activated_by_rowaddress_tuple
+                    .entry(row)
                     .or_default()
-                    .insert((RowAddress(i),RowAddress(j)));
+                    .insert((RowAddress(i), RowAddress(j)));
             }
         }
     }
     // debug!("Precomputed SRAs: {:#?}", precomputed_simultaneous_row_activations.iter().take(20).collect::<Vec<_>>());
 
-    let sra_degree_to_rowaddress_combinations=  precomputed_simultaneous_row_activations.iter()
-        .fold(HashMap::new(), |mut acc: HashMap<SupportedNrOperands, Vec<(RowAddress,RowAddress)>>, (row_combi, activated_rows)| {
-            acc.entry(SupportedNrOperands::try_from(activated_rows.len() as u8).unwrap()).or_default().push(*row_combi);
-            acc
-    });
+    let sra_degree_to_rowaddress_combinations =
+        precomputed_simultaneous_row_activations.iter().fold(
+            HashMap::new(),
+            |mut acc: HashMap<SupportedNrOperands, Vec<(RowAddress, RowAddress)>>,
+             (row_combi, activated_rows)| {
+                acc.entry(SupportedNrOperands::try_from(activated_rows.len() as u8).unwrap())
+                    .or_default()
+                    .push(*row_combi);
+                acc
+            },
+        );
     // output how many combinations of row-addresses activate the given nr of rows
     // debug!("SRAs row-nr to row-addr mapping: {:#?}", sra_degree_to_rowaddress_combinations.iter().map(|(k,v)| format!("{k} rows activated in {} addr-combinations", v.len())).collect::<Vec<String>>());
 
@@ -169,19 +223,29 @@ impl RowAddress {
     /// Converts RowAddress to the same row address but in the other subarray
     pub fn local_rowaddress_to_subarray_id(&self, subarray_id: SubarrayId) -> RowAddress {
         let local_row_address = self.0 & ROW_ID_BITMASK;
-        RowAddress( local_row_address | subarrayid_to_subarray_address(subarray_id).0 )
+        RowAddress(local_row_address | subarrayid_to_subarray_address(subarray_id).0)
     }
 }
 
 impl fmt::Display for RowAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.get_subarray_id().0, self.0 & ROW_ID_BITMASK)
+        write!(
+            f,
+            "{}.{}",
+            self.get_subarray_id().0,
+            self.0 & ROW_ID_BITMASK
+        )
     }
 }
 
 impl fmt::Debug for RowAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.get_subarray_id().0, self.0 & ROW_ID_BITMASK)
+        write!(
+            f,
+            "{}.{}",
+            self.get_subarray_id().0,
+            self.0 & ROW_ID_BITMASK
+        )
     }
 }
 
@@ -212,7 +276,6 @@ impl fmt::Display for SubarrayId {
         write!(f, "{}", self.0)
     }
 }
-
 
 // impl Display for Vec<RowAddress> {
 //     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -269,7 +332,6 @@ impl From<f64> for SuccessRate {
     }
 }
 
-
 /// see Figure6,13 in [1] for timing diagrams
 /// - all numbers are specified in ns
 pub struct TimingSpec {
@@ -301,18 +363,21 @@ pub struct FCDRAMArchitecture {
     /// Stores which rows are simultaneously activated for each combination of Row-Addresses (provided to `APA`-operation)
     /// - REASON: getting the simultaneously activated will probably be requested very frequently (time-space tradeoff, rather than recomputing on every request))
     /// - REMEMBER: set `subarrayid` of passed row-addresses to 0 (activated rows are precomputed exemplary for RowAddresses in subarray=0 since activated rows do <u>not</u> depend on corresponding subarrays)
-    pub precomputed_simultaneous_row_activations: HashMap<(RowAddress, RowAddress), Vec<RowAddress>>,
+    pub precomputed_simultaneous_row_activations:
+        HashMap<(RowAddress, RowAddress), Vec<RowAddress>>,
     /// Map degree of SRA (=nr of activated rows by that SRA) to all combinations of RowAddresses which have that degree of SRA
     /// - use to eg restrict the choice of row-addresses for n-ary AND/OR (eg 4-ary AND -> at least activate 8 rows; more rows could be activated when using input replication)
     /// NOTE: LogicOp determiens success-rate
-    pub sra_degree_to_rowaddress_combinations: HashMap<SupportedNrOperands, Vec<(RowAddress,RowAddress)>>,
+    pub sra_degree_to_rowaddress_combinations:
+        HashMap<SupportedNrOperands, Vec<(RowAddress, RowAddress)>>,
     // pub sra_degree_to_rowaddress_combinations: HashMap<(u8, LogicOp), BTreeMap<(RowAddress,RowAddress), SuccessRate>>, // to large runtime-overhead :/
     /// Stores for every rows which combinations of RowAddresses activate that row (needed for finding appropriate safe space rows)
     pub row_activated_by_rowaddress_tuple: HashMap<RowAddress, HashSet<(RowAddress, RowAddress)>>,
     /// Given a row-addr this returns the distance of it to the sense-amps (!determinse success-rate of op using that `row` as an operand) (see [1] Chap5.2)
     /// - NOTE: a realistic implementation should use the Methodology from [1] to determine this distance (RowHammer)
     ///     - there is no way of telling the distance of a row without testing manually (see [5] Chap3.2: "consecutive row addresses issued by the memory controller can be mapped to entirely different regions of DRAM")
-    pub get_distance_of_row_to_sense_amps: fn(RowAddress, NeighboringSubarrayRelPosition) -> RowDistanceToSenseAmps,
+    pub get_distance_of_row_to_sense_amps:
+        fn(RowAddress, NeighboringSubarrayRelPosition) -> RowDistanceToSenseAmps,
 }
 
 /// Implement this trait for your specific DRAM-module to support FCDRAM-functionality
@@ -323,7 +388,6 @@ pub struct FCDRAMArchitecture {
 ///
 /// - add trait-bound to a more general `Architecture`-trait to fit in the overall framework?
 impl FCDRAMArchitecture {
-
     /// Returns FC-DRAM operations to perform for each logical operation, with operand-rows NOT set !!!
     /// - addresses of row operands need to be overwritten during compilation !
     ///
@@ -339,38 +403,50 @@ impl FCDRAMArchitecture {
     /// subarray adjacent to the compute subarray (!this is not checked but assumed to be true!)
     pub fn get_instructions_implementation_of_logic_ops(logic_op: LogicOp) -> Vec<Instruction> {
         match logic_op {
-            LogicOp::NOT => vec!(Instruction::ApaNOT(RowAddress(0), RowAddress(0))),
-            LogicOp::AND => vec!(Instruction::FracOp(RowAddress(0)), Instruction::ApaNOT(RowAddress(0), RowAddress(0))),
-            LogicOp::OR => vec!(Instruction::FracOp(RowAddress(0)), Instruction::ApaNOT(RowAddress(0), RowAddress(0))),
+            LogicOp::NOT => vec![Instruction::ApaNOT(RowAddress(0), RowAddress(0))],
+            LogicOp::AND => vec![
+                Instruction::FracOp(RowAddress(0)),
+                Instruction::ApaNOT(RowAddress(0), RowAddress(0)),
+            ],
+            LogicOp::OR => vec![
+                Instruction::FracOp(RowAddress(0)),
+                Instruction::ApaNOT(RowAddress(0), RowAddress(0)),
+            ],
             LogicOp::NAND => {
                 // 1. AND, 2. NOT
                 FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::AND)
                     .into_iter()
-                    .chain( FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::NOT))
+                    .chain(
+                        FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(
+                            LogicOp::NOT,
+                        ),
+                    )
                     .collect()
-            },
+            }
             LogicOp::NOR => {
                 // 1. OR, 2. NOT
                 FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::OR)
                     .into_iter()
-                    .chain( FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(LogicOp::NOT))
+                    .chain(
+                        FCDRAMArchitecture::get_instructions_implementation_of_logic_ops(
+                            LogicOp::NOT,
+                        ),
+                    )
                     .collect()
             }
         }
     }
 
-    fn get_activated_rows() {
-
-    }
+    fn get_activated_rows() {}
 }
 
 /// Categories of distances of rows to sense-amops
 /// - HIB (higher is better): that's why [`RowDistanceToSenseAmps::Close`] has the highest int value
-#[derive(Hash,Eq,PartialEq,PartialOrd,Ord)]
+#[derive(Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum RowDistanceToSenseAmps {
-    Close=2,
-    Middle=1,
-    Far=0,
+    Close = 2,
+    Middle = 1,
+    Far = 0,
 }
 
 impl RowDistanceToSenseAmps {
@@ -378,8 +454,8 @@ impl RowDistanceToSenseAmps {
     pub fn reverse(&self) -> Self {
         match &self {
             RowDistanceToSenseAmps::Close => RowDistanceToSenseAmps::Far,
-            RowDistanceToSenseAmps::Middle=> RowDistanceToSenseAmps::Middle,
-            RowDistanceToSenseAmps::Far=> RowDistanceToSenseAmps::Close,
+            RowDistanceToSenseAmps::Middle => RowDistanceToSenseAmps::Middle,
+            RowDistanceToSenseAmps::Far => RowDistanceToSenseAmps::Close,
         }
     }
 }
@@ -407,11 +483,11 @@ pub enum Instruction {
     /// Multiple-Row Activation: `ACT R_F -> PRE -> ACT R_L -> PRE` of rows `R_F`,`R_L` for rows within
     /// different subarrays. As a result `R_L` holds the negated value of `R_F` (see Chap5.1 of PaperFunctionally Complete DRAMs
     /// src=1st operand, dst=2nd operand
-    ApaNOT(RowAddress,RowAddress),
+    ApaNOT(RowAddress, RowAddress),
     /// Multiple-Row Activation: `ACT R_F -> PRE -> ACT R_L -> PRE` of rows `R_F`,`R_L` for rows within
     /// different subarrays (but with different timings than `ApaNOT`!)
     /// src=1st operand, dst=2nd operand
-    ApaAndOr(RowAddress,RowAddress),
+    ApaAndOr(RowAddress, RowAddress),
     /// Fast-Parallel-Mode RowClone for cloning row-data within same subarray
     /// - corresponds to `AA`, basically copies from src-row -> row-buffer -> dst-row
     /// - first operand=src, 2nd operand=dst where `src` and `dst` MUST reside in the same subarray !
@@ -422,19 +498,44 @@ pub enum Instruction {
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let display_row = |row: &RowAddress| { format!("{}.{}", row.get_subarray_id().0, row.0 & ROW_ID_BITMASK)}; // display subarray separately
-        // TODO: change string-representation to display subarray-id
+        let display_row =
+            |row: &RowAddress| format!("{}.{}", row.get_subarray_id().0, row.0 & ROW_ID_BITMASK); // display subarray separately
+                                                                                                  // TODO: change string-representation to display subarray-id
         let description = match self {
             Instruction::FracOp(row) => format!("AP({})", display_row(row)),
-            Instruction::ApaNOT(row1,row2) => format!("APA_NOT({},{})", display_row(row1), display_row(row2)),
-            Instruction::ApaAndOr(row1,row2) => {
+            Instruction::ApaNOT(row1, row2) => {
+                format!("APA_NOT({},{})", display_row(row1), display_row(row2))
+            }
+            Instruction::ApaAndOr(row1, row2) => {
                 let (src_array, dst_array) = (row1.get_subarray_id(), row2.get_subarray_id());
-                let activated_rows: Vec<RowAddress> =  ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(row1.local_rowaddress_to_subarray_id(SubarrayId(0)),row2.local_rowaddress_to_subarray_id(SubarrayId(0)))).unwrap()
-                    .iter().flat_map(|row| vec!(row.local_rowaddress_to_subarray_id(src_array), row.local_rowaddress_to_subarray_id(dst_array)))
+                let activated_rows: Vec<RowAddress> = ARCHITECTURE
+                    .precomputed_simultaneous_row_activations
+                    .get(&(
+                        row1.local_rowaddress_to_subarray_id(SubarrayId(0)),
+                        row2.local_rowaddress_to_subarray_id(SubarrayId(0)),
+                    ))
+                    .unwrap()
+                    .iter()
+                    .flat_map(|row| {
+                        vec![
+                            row.local_rowaddress_to_subarray_id(src_array),
+                            row.local_rowaddress_to_subarray_id(dst_array),
+                        ]
+                    })
                     .collect();
-                format!("APA_AND_OR({},{}) // activates {:?}", display_row(row1), display_row(row2), activated_rows)
-            },
-            Instruction::RowCloneFPM(row1, row2, comment) => format!("AAP({},{}) // {}", display_row(row1), display_row(row2), comment),
+                format!(
+                    "APA_AND_OR({},{}) // activates {:?}",
+                    display_row(row1),
+                    display_row(row2),
+                    activated_rows
+                )
+            }
+            Instruction::RowCloneFPM(row1, row2, comment) => format!(
+                "AAP({},{}) // {}",
+                display_row(row1),
+                display_row(row2),
+                comment
+            ),
         };
         write!(f, "{}", description)
     }
@@ -443,15 +544,14 @@ impl Display for Instruction {
 /// TODO: where to put logic for determining which rows are activated simultaneously given two
 /// row-addresses
 impl Instruction {
-
     /// TODO: rewrite this (eg `ApaNOT` and `ApaAndOr` take different amount of time !!, see Figure
     pub fn get_nr_memcycles(&self) -> u16 {
         match self {
-            Instruction::FracOp(__) => 7,     // see [2] ChapIII.A, (two cmd-cycles + five idle cycles)
+            Instruction::FracOp(__) => 7, // see [2] ChapIII.A, (two cmd-cycles + five idle cycles)
             // TODO: change to ns (t_{RAS}+6ns) - `t_{RAS}` to mem cycles
-            Instruction::ApaNOT(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
-            Instruction::ApaAndOr(_, _) => 3,            // NOTE: this is not explicitly written in the paper, TODO: check with authors
-            Instruction::RowCloneFPM(_, _, _) => 2,    // see [4] Chap3.2 (TODO: not correct, given as 90ns?)
+            Instruction::ApaNOT(_, _) => 3, // NOTE: this is not explicitly written in the paper, TODO: check with authors
+            Instruction::ApaAndOr(_, _) => 3, // NOTE: this is not explicitly written in the paper, TODO: check with authors
+            Instruction::RowCloneFPM(_, _, _) => 2, // see [4] Chap3.2 (TODO: not correct, given as 90ns?)
         }
     }
 
@@ -462,7 +562,6 @@ impl Instruction {
     ///
     /// TAKEAWAY: `OR` is more reliable than `AND`
     pub fn get_success_rate_of_apa(&self, implemented_op: LogicOp) -> SuccessRate {
-
         // Quote from [1] Chap6.3: "the distance of all simultaneously activated rows" - unclear how this classification happend exactly. Let's be conservative and assume the worst-case behavior
         // (furthest away row for src-operands). For dst-rows we use the one closest to the sense-amps, since we can choose from which of the rows to read/save the result form
 
@@ -470,33 +569,52 @@ impl Instruction {
 
         // include nr of operands and distance of rows to sense-amps into success-rate
         match self {
-            Instruction::ApaNOT( src, dst) => {
-                let activated_rows = ARCHITECTURE.precomputed_simultaneous_row_activations.get(&(*src,*dst)).expect("[ERR] Missing SRA for ({r1},{r2}");
+            Instruction::ApaNOT(src, dst) => {
+                let activated_rows = ARCHITECTURE
+                    .precomputed_simultaneous_row_activations
+                    .get(&(*src, *dst))
+                    .expect("[ERR] Missing SRA for ({r1},{r2}");
                 let nr_operands = activated_rows.len(); // ASSUMPTION: it seems like "operands" referred to the number of activated rows (see [1]
-                // taken from [1] Chap6.3
+                                                        // taken from [1] Chap6.3
                 let success_rate_per_operandnr = HashMap::from([
                     (2, 94.94),
                     (4, 94.94),
                     (8, 95.85),
                     (16, 95.87),
-                    (32, 0.000) // no value in paper ://
+                    (32, 0.000), // no value in paper ://
                 ]);
                 // nr_operand_success_rate.get(&nr_operands);
 
                 let (src_array, dst_array) = (src.get_subarray_id(), dst.get_subarray_id());
-                let furthest_src_row = activated_rows.iter()
-                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, NeighboringSubarrayRelPosition::get_relative_position(&src_array, &dst_array))) // RowDistanceToSenseAmps::Far; // TODO: get this
+                let furthest_src_row = activated_rows
+                    .iter()
+                    .map(|row| {
+                        (ARCHITECTURE.get_distance_of_row_to_sense_amps)(
+                            *row,
+                            NeighboringSubarrayRelPosition::get_relative_position(
+                                &src_array, &dst_array,
+                            ),
+                        )
+                    }) // RowDistanceToSenseAmps::Far; // TODO: get this
                     .max()
                     .expect("[ERR] Activated rows were empty");
                 // NOTE: SRA is assumed to activate the same row-addresses in both subarrays
-                let closest_dst_row = activated_rows.iter()
-                    .map(|row| (ARCHITECTURE.get_distance_of_row_to_sense_amps)(*row, NeighboringSubarrayRelPosition::get_relative_position(&dst_array, &src_array))) // RowDistanceToSenseAmps::Far; // TODO: get this
+                let closest_dst_row = activated_rows
+                    .iter()
+                    .map(|row| {
+                        (ARCHITECTURE.get_distance_of_row_to_sense_amps)(
+                            *row,
+                            NeighboringSubarrayRelPosition::get_relative_position(
+                                &dst_array, &src_array,
+                            ),
+                        )
+                    }) // RowDistanceToSenseAmps::Far; // TODO: get this
                     .min()
                     .expect("[ERR] Activated rows were empty");
                 let total_success_rate = *success_rate_per_operandnr.get(&nr_operands).expect("[ERR] {nr_operands} not =1|2|4|8|16, the given SRA function seems to not comply with this core assumption.")
                     * success_rate_by_row_distance.get(&(furthest_src_row, closest_dst_row)).unwrap().0;
                 SuccessRate::new(total_success_rate)
-            },
+            }
             _ => SuccessRate::new(1.0),
         }
     }
@@ -516,71 +634,252 @@ pub enum LogicOp {
 }
 
 impl LogicOp {
-
     /// see [1] Chap5.3 and Chap6.3
-    pub fn get_success_rate_by_row_distance(&self) -> HashMap<(RowDistanceToSenseAmps,RowDistanceToSenseAmps), SuccessRate> {
+    pub fn get_success_rate_by_row_distance(
+        &self,
+    ) -> HashMap<(RowDistanceToSenseAmps, RowDistanceToSenseAmps), SuccessRate> {
         match self {
             LogicOp::NOT => HashMap::from([
-                    // ((src,dst), success_rate)
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 51.71.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 54.93.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Close), 44.16.into()),
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Middle), 57.47.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Middle), 53.47.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Middle), 81.92.into()),
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Far), 45.34.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 85.02.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 75.13.into()),
-                ]),
+                // ((src,dst), success_rate)
+                (
+                    (RowDistanceToSenseAmps::Close, RowDistanceToSenseAmps::Close),
+                    51.71.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Middle,
+                        RowDistanceToSenseAmps::Close,
+                    ),
+                    54.93.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Close),
+                    44.16.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Close,
+                        RowDistanceToSenseAmps::Middle,
+                    ),
+                    57.47.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Middle,
+                        RowDistanceToSenseAmps::Middle,
+                    ),
+                    53.47.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Middle),
+                    81.92.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Close, RowDistanceToSenseAmps::Far),
+                    45.34.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Middle, RowDistanceToSenseAmps::Far),
+                    85.02.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Far),
+                    75.13.into(),
+                ),
+            ]),
             LogicOp::AND => HashMap::from([
-                    // ((reference,compute), success_rate)
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 98.81.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.20.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Close), 80.04.into()),
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Middle), 97.08.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Middle), 83.26.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Middle), 97.71.into()),
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Far), 75.84.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 95.29.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 94.95.into()),
-                ]),
+                // ((reference,compute), success_rate)
+                (
+                    (RowDistanceToSenseAmps::Close, RowDistanceToSenseAmps::Close),
+                    98.81.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Middle,
+                        RowDistanceToSenseAmps::Close,
+                    ),
+                    99.20.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Close),
+                    80.04.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Close,
+                        RowDistanceToSenseAmps::Middle,
+                    ),
+                    97.08.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Middle,
+                        RowDistanceToSenseAmps::Middle,
+                    ),
+                    83.26.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Middle),
+                    97.71.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Close, RowDistanceToSenseAmps::Far),
+                    75.84.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Middle, RowDistanceToSenseAmps::Far),
+                    95.29.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Far),
+                    94.95.into(),
+                ),
+            ]),
             LogicOp::OR => HashMap::from([
-                    // ((reference,compute), success_rate)
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 99.51.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.65.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Close), 94.29.into()),
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Middle), 98.98.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Middle), 94.15.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Middle), 98.95.into()),
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Far), 89.23.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 98.59.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 98.80.into()),
-                ]),
+                // ((reference,compute), success_rate)
+                (
+                    (RowDistanceToSenseAmps::Close, RowDistanceToSenseAmps::Close),
+                    99.51.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Middle,
+                        RowDistanceToSenseAmps::Close,
+                    ),
+                    99.65.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Close),
+                    94.29.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Close,
+                        RowDistanceToSenseAmps::Middle,
+                    ),
+                    98.98.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Middle,
+                        RowDistanceToSenseAmps::Middle,
+                    ),
+                    94.15.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Middle),
+                    98.95.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Close, RowDistanceToSenseAmps::Far),
+                    89.23.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Middle, RowDistanceToSenseAmps::Far),
+                    98.59.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Far),
+                    98.80.into(),
+                ),
+            ]),
             LogicOp::NAND => HashMap::from([
-                    // ((reference,compute), success_rate)
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 98.81.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.20.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Close), 79.59.into()),
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Middle), 97.08.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Middle), 82.98.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Middle), 97.67.into()),
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Far), 75.50.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 95.19.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 94.95.into()),
-                ]),
+                // ((reference,compute), success_rate)
+                (
+                    (RowDistanceToSenseAmps::Close, RowDistanceToSenseAmps::Close),
+                    98.81.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Middle,
+                        RowDistanceToSenseAmps::Close,
+                    ),
+                    99.20.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Close),
+                    79.59.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Close,
+                        RowDistanceToSenseAmps::Middle,
+                    ),
+                    97.08.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Middle,
+                        RowDistanceToSenseAmps::Middle,
+                    ),
+                    82.98.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Middle),
+                    97.67.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Close, RowDistanceToSenseAmps::Far),
+                    75.50.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Middle, RowDistanceToSenseAmps::Far),
+                    95.19.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Far),
+                    94.95.into(),
+                ),
+            ]),
             LogicOp::NOR => HashMap::from([
-                    // ((reference,compute), success_rate)
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Close), 99.51.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Close), 99.65.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Close), 94.09.into()),
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Middle), 98.97.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Middle), 94.03.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Middle), 98.90.into()),
-                    ((RowDistanceToSenseAmps::Close,RowDistanceToSenseAmps::Far), 89.15.into()),
-                    ((RowDistanceToSenseAmps::Middle,RowDistanceToSenseAmps::Far), 98.52.into()),
-                    ((RowDistanceToSenseAmps::Far,RowDistanceToSenseAmps::Far), 98.80.into()),
-                ]),
-            }
+                // ((reference,compute), success_rate)
+                (
+                    (RowDistanceToSenseAmps::Close, RowDistanceToSenseAmps::Close),
+                    99.51.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Middle,
+                        RowDistanceToSenseAmps::Close,
+                    ),
+                    99.65.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Close),
+                    94.09.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Close,
+                        RowDistanceToSenseAmps::Middle,
+                    ),
+                    98.97.into(),
+                ),
+                (
+                    (
+                        RowDistanceToSenseAmps::Middle,
+                        RowDistanceToSenseAmps::Middle,
+                    ),
+                    94.03.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Middle),
+                    98.90.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Close, RowDistanceToSenseAmps::Far),
+                    89.15.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Middle, RowDistanceToSenseAmps::Far),
+                    98.52.into(),
+                ),
+                (
+                    (RowDistanceToSenseAmps::Far, RowDistanceToSenseAmps::Far),
+                    98.80.into(),
+                ),
+            ]),
+        }
     }
 
     /// taken from Figure7 (NOT) & Figure15 (AND/OR/NAND/NOR) in [1] (using Mean-dot)
@@ -591,48 +890,48 @@ impl LogicOp {
     /// - for AND/OR/NAND/NOR: "The success rate of bitwise operations consistently increases as the number of input operands increases." (see Observation 11 [1])
     /// - for NOT: seems to be the opposite
     pub fn get_success_rate_by_nr_operands(&self) -> HashMap<SupportedNrOperands, SuccessRate> {
-       match self {
+        match self {
             LogicOp::NOT => HashMap::from([
-                    // ((src,dst), success_rate)
-                    (SupportedNrOperands::One, 98.5.into()),
-                    (SupportedNrOperands::Two, 97.5.into()),
-                    (SupportedNrOperands::Four, 97.0.into()),
-                    (SupportedNrOperands::Eight, 28.0.into()),
-                    (SupportedNrOperands::Sixteen, 10.0.into()),
-                    (SupportedNrOperands::Thirtytwo, 8.0.into()),
-                ]),
+                // ((src,dst), success_rate)
+                (SupportedNrOperands::One, 98.5.into()),
+                (SupportedNrOperands::Two, 97.5.into()),
+                (SupportedNrOperands::Four, 97.0.into()),
+                (SupportedNrOperands::Eight, 28.0.into()),
+                (SupportedNrOperands::Sixteen, 10.0.into()),
+                (SupportedNrOperands::Thirtytwo, 8.0.into()),
+            ]),
             LogicOp::AND => HashMap::from([
-                    // ((reference,compute), success_rate)
-                    (SupportedNrOperands::Two, 86.0.into()),
-                    (SupportedNrOperands::Four, 91.5.into()),
-                    (SupportedNrOperands::Eight, 92.5.into()),
-                    (SupportedNrOperands::Sixteen, 96.0.into()),
-                ]),
+                // ((reference,compute), success_rate)
+                (SupportedNrOperands::Two, 86.0.into()),
+                (SupportedNrOperands::Four, 91.5.into()),
+                (SupportedNrOperands::Eight, 92.5.into()),
+                (SupportedNrOperands::Sixteen, 96.0.into()),
+            ]),
             LogicOp::OR => HashMap::from([
-                    // ((reference,compute), success_rate)
-                    // TODO
-                    (SupportedNrOperands::Two, 97.5.into()),
-                    (SupportedNrOperands::Four, 97.0.into()),
-                    (SupportedNrOperands::Eight, 28.0.into()),
-                    (SupportedNrOperands::Sixteen, 10.0.into()),
-                ]),
+                // ((reference,compute), success_rate)
+                // TODO
+                (SupportedNrOperands::Two, 97.5.into()),
+                (SupportedNrOperands::Four, 97.0.into()),
+                (SupportedNrOperands::Eight, 28.0.into()),
+                (SupportedNrOperands::Sixteen, 10.0.into()),
+            ]),
             LogicOp::NAND => HashMap::from([
-                    // ((reference,compute), success_rate)
-                    // TODO
-                    (SupportedNrOperands::Two, 97.5.into()),
-                    (SupportedNrOperands::Four, 97.0.into()),
-                    (SupportedNrOperands::Eight, 28.0.into()),
-                    (SupportedNrOperands::Sixteen, 10.0.into()),
-                ]),
+                // ((reference,compute), success_rate)
+                // TODO
+                (SupportedNrOperands::Two, 97.5.into()),
+                (SupportedNrOperands::Four, 97.0.into()),
+                (SupportedNrOperands::Eight, 28.0.into()),
+                (SupportedNrOperands::Sixteen, 10.0.into()),
+            ]),
             LogicOp::NOR => HashMap::from([
-                    // ((reference,compute), success_rate)
-                    // TODO
-                    (SupportedNrOperands::Two, 97.5.into()),
-                    (SupportedNrOperands::Four, 97.0.into()),
-                    (SupportedNrOperands::Eight, 28.0.into()),
-                    (SupportedNrOperands::Sixteen, 10.0.into()),
-                ]),
-            }
+                // ((reference,compute), success_rate)
+                // TODO
+                (SupportedNrOperands::Two, 97.5.into()),
+                (SupportedNrOperands::Four, 97.0.into()),
+                (SupportedNrOperands::Eight, 28.0.into()),
+                (SupportedNrOperands::Sixteen, 10.0.into()),
+            ]),
+        }
     }
 }
 
@@ -647,7 +946,7 @@ pub enum SupportedNrOperands {
     Eight = 8,
     Sixteen = 16,
     /// Only performed for `NOT`
-    Thirtytwo = 32
+    Thirtytwo = 32,
 }
 
 impl TryFrom<u8> for SupportedNrOperands {
@@ -680,13 +979,15 @@ pub trait RowDecoder {
     /// Returns vector of simultaneously activated rows when issuing `APA(r1,r2)`-cmd
     /// NOTE: this may depend on the used DRAM - see [3] for a method for reverse-engineering
     /// which rows are activated simultaneously (also see RowClone)
-    fn get_simultaneously_activated_rows_of_apa_op(&self, r1: RowAddress, r2: RowAddress) -> Vec<RowAddress>;
+    fn get_simultaneously_activated_rows_of_apa_op(
+        &self,
+        r1: RowAddress,
+        r2: RowAddress,
+    ) -> Vec<RowAddress>;
 
     // TODO: get activation pattern for given rows r1,r2 (N:N vs N:2N) - or just check whether
     // N:2N: is supported and let `get_simultaneously_activated_rows_of_apa_op()` handle the rest?
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -697,6 +998,13 @@ mod tests {
 
     #[test] // mark function as test-fn
     fn test_sra() {
-        println!("{:?}", ARCHITECTURE.sra_degree_to_rowaddress_combinations.get(&SupportedNrOperands::try_from(8 as u8).unwrap()).unwrap().first());
+        println!(
+            "{:?}",
+            ARCHITECTURE
+                .sra_degree_to_rowaddress_combinations
+                .get(&SupportedNrOperands::try_from(8 as u8).unwrap())
+                .unwrap()
+                .first()
+        );
     }
 }

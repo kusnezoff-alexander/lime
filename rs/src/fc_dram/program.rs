@@ -7,7 +7,6 @@ use eggmock::Signal;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
-
 #[derive(Debug, Clone)]
 pub struct Program {
     pub instructions: Vec<Instruction>,
@@ -36,13 +35,12 @@ impl Program {
 /// Print the generated program in human-readable form
 impl Display for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let display_row = |row: &RowAddress| {
-            format!("{}.{}", row.get_subarray_id(), row.0 & ROW_ID_BITMASK)
-        }; // display subarray separately
-
+        let display_row =
+            |row: &RowAddress| format!("{}.{}", row.get_subarray_id(), row.0 & ROW_ID_BITMASK); // display subarray separately
 
         let display_rows = |rows: Vec<RowAddress>| {
-            let formatted: Vec<String> = rows.iter()
+            let formatted: Vec<String> = rows
+                .iter()
                 .map(|&row| format!("{}.{}", row.get_subarray_id(), row.0 & ROW_ID_BITMASK))
                 .collect();
 
@@ -57,10 +55,16 @@ impl Display for Program {
         writeln!(f, "---------------------------------------")?;
         writeln!(f, "Constant operand placement:")?;
         for (constant, row) in &self.constants_row_placement {
-            writeln!(f, "{} in {}", constant, display_row(&row.local_rowaddress_to_subarray_id(super::architecture::SubarrayId(0))))?;
+            writeln!(
+                f,
+                "{} in {}",
+                constant,
+                display_row(
+                    &row.local_rowaddress_to_subarray_id(super::architecture::SubarrayId(0))
+                )
+            )?;
         }
         writeln!(f, "---------------------------------------")?;
-
 
         for instr in &self.instructions {
             writeln!(f, "{}", instr)?;
@@ -68,7 +72,7 @@ impl Display for Program {
 
         writeln!(f, "---------------------------------------")?;
         writeln!(f, "Output operand placement:")?;
-        for (signal, row) in &self.output_row_operands_placement{
+        for (signal, row) in &self.output_row_operands_placement {
             writeln!(f, "{:?} in {}", signal, display_row(row))?;
         }
         writeln!(f, "---------------------------------------")?;

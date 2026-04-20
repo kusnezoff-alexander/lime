@@ -36,27 +36,25 @@ void run_fcdram_example()
 {
 
   aig_network in;
-  // const auto b_i = in.create_pi();
-  // const auto b_i_next = in.create_pi();
-  // const auto m = in.create_pi();
-  //
-  // const auto O1 = in.create_and( m, b_i_next );
-  // const auto O2 = in.create_and( in.create_not( m ), b_i );
-  // const auto O3 = in.create_and( in.create_not( O2 ), O1 );
-  // const auto bi = in.create_or( O1, O2 );
-  // in.create_po( bi );
-  // in.create_po( O3 );
+  const auto b_i = in.create_pi();
+  const auto b_i_next = in.create_pi();
+  const auto m = in.create_pi();
+
+  const auto O1 = in.create_and( m, b_i_next );
+  const auto O2 = in.create_and( in.create_not( m ), b_i );
+  const auto bi = in.create_or( O1, O2 );
+  in.create_po( bi );
 
   // test and(and2,and2) -> and4
-  const auto i1 = in.create_pi();
-  const auto i2 = in.create_pi();
-  const auto i3 = in.create_pi();
-  const auto i4 = in.create_pi();
-
-  const auto o1 = in.create_and( i1, i2);
-  const auto o2 = in.create_and( i3, i4);
-  const auto o3 = in.create_and( o1,o2 );
-  in.create_po( o3 );
+  // const auto i1 = in.create_pi();
+  // const auto i2 = in.create_pi();
+  // const auto i3 = in.create_pi();
+  // const auto i4 = in.create_pi();
+  //
+  // const auto o1 = in.create_and( i1, i2);
+  // const auto o2 = in.create_and( i3, i4);
+  // const auto o3 = in.create_and( o1,o2 );
+  // in.create_po( o3 );
 
   write_dot( in, "in.dot" );
   std::cout << "Sending graph to fcdram_compile..." << std::endl;
@@ -95,6 +93,6 @@ int main()
   in.create_po( bi );
 
   write_dot( in, "in.dot" );
-  run_ambit_example(in);
-  // run_fcdram_example();
+  // run_ambit_example(in);
+  run_fcdram_example();
 }

@@ -32,13 +32,15 @@ use crate::measure_time;
 use self::compiler::Compiler;
 use self::cost_estimation::CompilingCostFunction;
 
+use architecture::*;
+use architecture::*;
 use eggmock::egg::{rewrite, EGraph, Extractor, Id, Rewrite, Runner};
 use eggmock::{
-    AigReceiverFFI, Aoig, AoigLanguage, Network, NetworkWithBackwardEdges, Receiver, ReceiverFFI, Signal
+    AigReceiverFFI, Aoig, AoigLanguage, Network, NetworkWithBackwardEdges, Receiver, ReceiverFFI,
+    Signal,
 };
 use log::debug;
 use program::*;
-use architecture::*;
 
 /// Rewrite rules to use in E-Graph Rewriting (see [egg](https://egraphs-good.github.io/))
 /// TODO: adjust rewriting rules to FCDRAM (=AND/OR related rewrites like De-Morgan?)
@@ -50,14 +52,12 @@ static REWRITE_RULES: LazyLock<Vec<Rewrite<AoigLanguage, ()>>> = LazyLock::new(|
         rewrite!("and-0"; "(and ?a f)" => "f"),
         rewrite!("or-1"; "(or ?a (! f))" => "(! f)"),
         rewrite!("or-0"; "(or ?a f)" => "?a"),
-
         rewrite!("and-or"; "(! (or (! ?a) (! ?b)))" => "(and ?a ?b)"), // (De-Morgan)
         rewrite!("or-and"; "(! (and (! ?a) (! ?b)))" => "(or ?a ?b)" ), // (De-Morgan)
         // rewrite!("and-or-more-not"; "(and ?a ?b)" => "(! (or (! ?a) (! ?b)))"), // (De-Morgan)
         // rewrite!("or-and-more-not"; "(or ?a ?b)" => "(! (and (! ?a) (! ?b)))"), // (De-Morgan)
         rewrite!("and-same"; "(and ?a ?a)" => "?a"),
         rewrite!("not_not"; "(! (! ?a))" => "?a"),
-
         // in general more operands are better for AND/OR (see [1])
         rewrite!("and2_to_4"; "(and (and ?a ?b) (and ?c ?d))" => "(and4 ?a ?b ?c ?d)"),
         rewrite!("and4_to_8"; "(and (and4 ?a ?b ?c ?d) (and4 ?e ?f ?g ?h))" => "(and8 ?a ?b ?c ?d ?e ?f ?g ?h)"),
@@ -81,7 +81,7 @@ struct CompilerOutput {
     /// A network consists of nodes (accessed via `Extractor` and separately stored `outputs` (`Vec<Id>`)
     ntk: (
         Extractor<'this, CompilingCostFunction, AoigLanguage, ()>, // `'this`=self-reference, used to extract best-node from `E-Class` of `AoigLanguage`-nodes based on `CompilingCostFunction`
-        Vec<Id>, // vector of outputs
+        Vec<Id>,                                                   // vector of outputs
     ),
     /// Compiled Program Program is compiled using previously (EGraph-)extracted `ntk`
     #[borrows(ntk)]
@@ -97,73 +97,87 @@ fn compiling_receiver<'a>(
 ) -> impl Receiver<Result = CompilerOutput, Node = Aoig> + use<'a> {
     // REMINDER: EGraph implements `Receiver`
     let mut compiler = Compiler::new(settings.clone());
-    EGraph::<AoigLanguage, _>::new(())
-        .map(move |(graph, outputs)| { // `.map()` of `Provider`-trait!, outputs=vector of EClasses
+    EGraph::<AoigLanguage, _>::new(()).map(move |(graph, outputs)| {
+        // `.map()` of `Provider`-trait!, outputs=vector of EClasses
 
-            debug!("Input EGraph nodes: {:?}", graph.nodes());
-            debug!("Input EGraph's EClasses : {:?}", graph.classes()
-                .map(|eclass| (eclass.id, &eclass.nodes) )
-                .collect::<Vec<(Id,&Vec<AoigLanguage>)>>()
-            );
-            // 1. Create E-Graph: run equivalence saturation
-            debug!("Running equivalence saturation...");
-            let runner = measure_time!(
-                Runner::default().with_egraph(graph).run(rules),  "t_runner", settings.print_compilation_stats
-            );
+        debug!("Input EGraph nodes: {:?}", graph.nodes());
+        debug!(
+            "Input EGraph's EClasses : {:?}",
+            graph
+                .classes()
+                .map(|eclass| (eclass.id, &eclass.nodes))
+                .collect::<Vec<(Id, &Vec<AoigLanguage>)>>()
+        );
+        // 1. Create E-Graph: run equivalence saturation
+        debug!("Running equivalence saturation...");
+        let runner = measure_time!(
+            Runner::default().with_egraph(graph).run(rules),
+            "t_runner",
+            settings.print_compilation_stats
+        );
 
-            if settings.verbose {
-                println!("== Runner Report");
-                runner.print_report();
-            }
+        if settings.verbose {
+            println!("== Runner Report");
+            runner.print_report();
+        }
 
-            let graph = runner.egraph;
+        let graph = runner.egraph;
 
-            CompilerOutput::new(
-                graph,
-                |graph| {
-            // 2. Given E-Graph: Retrieve best graph using custom `CompilingCostFunction`
-                    debug!("Extracting...");
-                    let extractor = measure_time!(
-                        Extractor::new(
-                            graph,
-                            CompilingCostFunction {},
-                        ),
-                        "t_extractor", settings.print_compilation_stats
-                    );
-                    debug!("Outputs: {outputs:?}");
-                    (extractor, outputs) // produce `ntk`
-                },
-                |ntk| {
-                    // ===== MAIN CALL (actual compilation) =====
-            // 3. Compile program using extracted network
+        CompilerOutput::new(
+            graph,
+            |graph| {
+                // 2. Given E-Graph: Retrieve best graph using custom `CompilingCostFunction`
+                debug!("Extracting...");
+                let extractor = measure_time!(
+                    Extractor::new(graph, CompilingCostFunction {},),
+                    "t_extractor",
+                    settings.print_compilation_stats
+                );
+                debug!("Outputs: {outputs:?}");
+                (extractor, outputs) // produce `ntk`
+            },
+            |ntk| {
+                // ===== MAIN CALL (actual compilation) =====
+                // 3. Compile program using extracted network
 
-                    debug!("Compiling...");
-                    debug!("Network outputs: {:?}", ntk.outputs().collect::<Vec<Signal>>());
-                    ntk.dump();
-                    let ntk_with_backward_edges = ntk.with_backward_edges();
-                    debug!("Network Leaves: {:?}", ntk_with_backward_edges.leaves().collect::<Vec<eggmock::Id>>());
-                    debug!("Network Outputs of first leaf: {:?}",
-                        ntk_with_backward_edges.node_outputs(
-                            ntk_with_backward_edges.leaves().next().unwrap()
-                        ).collect::<Vec<eggmock::Id>>()
-                    );
+                debug!("Compiling...");
+                debug!(
+                    "Network outputs: {:?}",
+                    ntk.outputs().collect::<Vec<Signal>>()
+                );
+                ntk.dump();
+                let ntk_with_backward_edges = ntk.with_backward_edges();
+                debug!(
+                    "Network Leaves: {:?}",
+                    ntk_with_backward_edges
+                        .leafs()
+                        .collect::<Vec<eggmock::Id>>()
+                );
+                debug!(
+                    "Network Outputs of first leaf: {:?}",
+                    ntk_with_backward_edges
+                        .node_outputs(ntk_with_backward_edges.leafs().next().unwrap())
+                        .collect::<Vec<eggmock::Id>>()
+                );
 
-                    let program = measure_time!(
-                        compiler.compile(&ntk_with_backward_edges), "t_compiler", settings.print_compilation_stats
-                    );
-                    // =====================
+                let program = measure_time!(
+                    compiler.compile(&ntk_with_backward_edges),
+                    "t_compiler",
+                    settings.print_compilation_stats
+                );
+                // =====================
 
-                    // print program if compiler-setting is set
-                    // TOOD: write program to output-file instead !!
-                    if settings.print_program || settings.verbose {
-                        if settings.verbose {
-                            println!("== Program")
-                        }
-                        println!("{program}");
+                // print program if compiler-setting is set
+                // TOOD: write program to output-file instead !!
+                if settings.print_program || settings.verbose {
+                    if settings.verbose {
+                        println!("== Program")
                     }
-                    program
-                },
-            )
+                    println!("{program}");
+                }
+                program
+            },
+        )
     })
 }
 
@@ -184,7 +198,6 @@ pub struct CompilerSettings {
     min_success_rate: f64,
     // /// Location to config-file holding fcdram-specific configs
     // fcdram_config_file: Path,
-
     /// How many times to issue FracOps to store `V_{DD}/2` in one of the activated rows for AND/OR
     repetition_fracops: u64,
     /// Nr of rows to use as a safe space for operands per subarray
@@ -223,19 +236,16 @@ struct CompilerStatistics {
 /// - `settings`: settings to use when running compiler
 #[no_mangle]
 extern "C" fn fcdram_compile(settings: CompilerSettings) -> AigReceiverFFI<CompilerStatistics> {
-
     env_logger::init(); // needed for `export RUST_LOG=debug` to work
-    let receiver =
-        compiling_receiver(REWRITE_RULES.as_slice(), settings)
-            .map(|output| {
-                let graph = output.borrow_graph();
-                CompilerStatistics {
-                    egraph_classes: graph.number_of_classes() as u64,
-                    egraph_nodes: graph.total_number_of_nodes() as u64,
-                    egraph_size: graph.total_size() as u64,
-                    instruction_count: output.borrow_program().instructions.len() as u64,
-            }
-        });
+    let receiver = compiling_receiver(REWRITE_RULES.as_slice(), settings).map(|output| {
+        let graph = output.borrow_graph();
+        CompilerStatistics {
+            egraph_classes: graph.number_of_classes() as u64,
+            egraph_nodes: graph.total_number_of_nodes() as u64,
+            egraph_size: graph.total_size() as u64,
+            instruction_count: output.borrow_program().instructions.len() as u64,
+        }
+    });
     // return graph back to calling cpp-code
     AigReceiverFFI::new(receiver.adapt(Into::into))
 }

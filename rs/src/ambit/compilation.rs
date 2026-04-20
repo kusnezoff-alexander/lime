@@ -96,7 +96,7 @@ impl<'a, 'n, P: NetworkWithBackwardEdges<Node = Mig>> CompilationState<'a, 'n, P
         let mut candidates = FxHashSet::default();
         // check all parents of leaves whether they have only leaf children, in which case they are
         // candidates
-        for leaf in network.leaves() {
+        for leaf in network.leafs() {
             for candidate_id in network.node_outputs(leaf) {
                 let candidate = network.node(candidate_id);
                 if candidate

@@ -5,7 +5,7 @@
 //!     - memory-footprint (reduce nr of subarrays used by program)
 //!         - manually adapt safe-space to program requirements: unused safe-space rows could still be used ?!
 //!         - [ ] Rematerialization ?
-use crate::fc_dram::architecture::{RowAddress, Instruction};
+use crate::fc_dram::architecture::{Instruction, RowAddress};
 
 use super::{architecture::FCDRAMArchitecture, program::Program};
 
@@ -29,4 +29,3 @@ impl Optimization<'_> {
         todo!()
     }
 }
-
