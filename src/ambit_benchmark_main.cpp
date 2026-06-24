@@ -4,7 +4,9 @@
 #include <mockturtle/networks/mig.hpp>
 
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
+#include <string>
 
 using namespace mockturtle;
 using namespace eggmock;
@@ -31,9 +33,16 @@ int main( int const argc, char** argv )
   preoptimize_mig( *mig );
   auto const t_opt = duration_cast<milliseconds>( system_clock::now() - opt_begin ).count();
 
-  auto constexpr settings = ambit_compiler_settings{
+  // AMBIT_REWRITE=0 disables e-graph rewriting (no saturation) -> much smaller
+  // graph to extract, at the cost of an unoptimized (longer) program.
+  const char* rw_env = std::getenv( "AMBIT_REWRITE" );
+  bool const do_rewrite = !( rw_env && std::string( rw_env ) == "0" );
+
+  auto const settings = ambit_compiler_settings{
       .print_program = false,
-      .verbose = false,
+      // .verbose = false,
+      .verbose = true, // to look at the generated programs
+      .rewrite = do_rewrite,
   };
 
   const auto [egraph_classes, egraph_nodes, egraph_size,

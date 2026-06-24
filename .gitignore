@@ -8,3 +8,9 @@ src/eggmock.h
 
 bench/ambit.csv
 bench/vis
+mockturtle/**
+rs/corrosion/**
+rs/mockturtle/**
+rs/cargo/**
+rs/_deps/**
+rs/CMakeFiles/**
