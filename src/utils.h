@@ -25,11 +25,6 @@ std::optional<ntk> read_ntk( std::string const& path );
 
 void preoptimize_mig( mockturtle::mig_network& ntk );
 
-/**
- * Collection of logic networks (eg for benchmarking)
- * - included logic networks: Full Adder ("fa"), Multiplexer ("mux"), Greater than ("gt"), "kogge_stone"
- * - carry_ripple_adder_inplace ("add"), carry_ripple_multiplier ("mul"), sum-adder ("pop")
- */
 template<class ntk_t>
 signal<ntk_t> ripple_gt( ntk_t& ntk,
                          const std::vector<signal<ntk_t>>& a_bits,
@@ -740,9 +735,6 @@ std::optional<ntk_t> get_ntk( std::string const& key )
   return {};
 }
 
-/**
- * Read network from .aig/.pla/.verilog file
- */
 template<class ntk_t>
 std::optional<ntk_t> read_ntk( const std::string& path )
 {
