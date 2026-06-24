@@ -1,0 +1,116 @@
+[
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DDISABLE_NAUTY -DFMT_HEADER_ONLY -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/include -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/kitty -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/lorina -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/rang -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/fmt -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/parallel_hashmap -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/percy -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/json -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/bill -std=gnu++20 -o CMakeFiles/lime_base.dir/src/utils.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/src/utils.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/src/utils.cpp",
+  "output": "CMakeFiles/lime_base.dir/src/utils.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DDISABLE_NAUTY -DFMT_HEADER_ONLY -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/include -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/kitty -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/lorina -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/rang -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/fmt -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/parallel_hashmap -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/percy -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/json -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/bill -std=gnu++20 -o CMakeFiles/lime.dir/src/main.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/src/main.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/src/main.cpp",
+  "output": "CMakeFiles/lime.dir/src/main.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DDISABLE_NAUTY -DFMT_HEADER_ONLY -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/include -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/kitty -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/lorina -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/rang -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/fmt -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/parallel_hashmap -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/percy -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/json -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/bill -std=gnu++20 -o CMakeFiles/lime_ambit_benchmark.dir/src/ambit_benchmark_main.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/src/ambit_benchmark_main.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/src/ambit_benchmark_main.cpp",
+  "output": "CMakeFiles/lime_ambit_benchmark.dir/src/ambit_benchmark_main.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcsat",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcsat.dir/AbcGlucose.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat/AbcGlucose.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat/AbcGlucose.cpp",
+  "output": "mockturtle/lib/abcsat/CMakeFiles/libabcsat.dir/AbcGlucose.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcsat",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcsat.dir/Glucose.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat/Glucose.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat/Glucose.cpp",
+  "output": "mockturtle/lib/abcsat/CMakeFiles/libabcsat.dir/Glucose.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcsat",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcsat.dir/SimpSolver.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat/SimpSolver.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat/SimpSolver.cpp",
+  "output": "mockturtle/lib/abcsat/CMakeFiles/libabcsat.dir/SimpSolver.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcsat",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcsat.dir/satSolver.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat/satSolver.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat/satSolver.cpp",
+  "output": "mockturtle/lib/abcsat/CMakeFiles/libabcsat.dir/satSolver.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcsat",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcsat.dir/satStore.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat/satStore.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat/satStore.cpp",
+  "output": "mockturtle/lib/abcsat/CMakeFiles/libabcsat.dir/satStore.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcesop",
+  "command": "/usr/bin/c++ -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcesop.dir/exor.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exor.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exor.cpp",
+  "output": "mockturtle/lib/abcesop/CMakeFiles/libabcesop.dir/exor.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcesop",
+  "command": "/usr/bin/c++ -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcesop.dir/exorBits.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exorBits.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exorBits.cpp",
+  "output": "mockturtle/lib/abcesop/CMakeFiles/libabcesop.dir/exorBits.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcesop",
+  "command": "/usr/bin/c++ -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcesop.dir/exorCubes.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exorCubes.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exorCubes.cpp",
+  "output": "mockturtle/lib/abcesop/CMakeFiles/libabcesop.dir/exorCubes.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcesop",
+  "command": "/usr/bin/c++ -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcesop.dir/exorLink.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exorLink.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exorLink.cpp",
+  "output": "mockturtle/lib/abcesop/CMakeFiles/libabcesop.dir/exorLink.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcesop",
+  "command": "/usr/bin/c++ -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcesop.dir/exorList.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exorList.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exorList.cpp",
+  "output": "mockturtle/lib/abcesop/CMakeFiles/libabcesop.dir/exorList.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/lib/abcesop",
+  "command": "/usr/bin/c++ -DABC_NO_USE_READLINE -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -w -o CMakeFiles/libabcesop.dir/exorUtil.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exorUtil.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop/exorUtil.cpp",
+  "output": "mockturtle/lib/abcesop/CMakeFiles/libabcesop.dir/exorUtil.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/examples",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DDISABLE_NAUTY -DFMT_HEADER_ONLY -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/include -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/kitty -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/lorina -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/rang -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/fmt -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/parallel_hashmap -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/percy -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/json -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/bill -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -o CMakeFiles/cut_enumeration.dir/cut_enumeration.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/examples/cut_enumeration.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/examples/cut_enumeration.cpp",
+  "output": "mockturtle/examples/CMakeFiles/cut_enumeration.dir/cut_enumeration.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/examples",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DDISABLE_NAUTY -DFMT_HEADER_ONLY -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/include -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/kitty -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/lorina -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/rang -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/fmt -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/parallel_hashmap -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/percy -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/json -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/bill -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -o CMakeFiles/draw.dir/draw.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/examples/draw.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/examples/draw.cpp",
+  "output": "mockturtle/examples/CMakeFiles/draw.dir/draw.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/examples",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DDISABLE_NAUTY -DFMT_HEADER_ONLY -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/include -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/kitty -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/lorina -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/rang -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/fmt -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/parallel_hashmap -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/percy -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/json -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/bill -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -o CMakeFiles/fuzz.dir/fuzz.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/examples/fuzz.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/examples/fuzz.cpp",
+  "output": "mockturtle/examples/CMakeFiles/fuzz.dir/fuzz.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/examples",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DDISABLE_NAUTY -DFMT_HEADER_ONLY -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/include -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/kitty -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/lorina -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/rang -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/fmt -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/parallel_hashmap -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/percy -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/json -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/bill -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -o CMakeFiles/fuzz_abc.dir/fuzz_abc.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/examples/fuzz_abc.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/examples/fuzz_abc.cpp",
+  "output": "mockturtle/examples/CMakeFiles/fuzz_abc.dir/fuzz_abc.cpp.o"
+},
+{
+  "directory": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/rs/mockturtle/examples",
+  "command": "/usr/bin/c++ -DABC_NAMESPACE=pabc -DABC_NO_USE_READLINE -DDISABLE_NAUTY -DFMT_HEADER_ONLY -DLIN64 -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcsat -I/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/abcesop -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/include -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/kitty -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/lorina -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/rang -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/fmt -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/parallel_hashmap -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/percy -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/json -isystem /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/lib/bill -std=gnu++17 -W -Wall -Wextra -Wno-unknown-pragmas -o CMakeFiles/minimize.dir/minimize.cpp.o -c /home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/examples/minimize.cpp",
+  "file": "/home/alex/Documents/Studium/Sem7/hauptseminar/lime/mockturtle/examples/minimize.cpp",
+  "output": "mockturtle/examples/CMakeFiles/minimize.dir/minimize.cpp.o"
+}
+]
