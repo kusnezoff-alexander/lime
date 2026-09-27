@@ -42,6 +42,8 @@ int main( int const argc, char** argv )
       .print_program = false,
       // .verbose = false,
       .verbose = true, // to look at the generated programs
+      // already preoptimized above (and timed as t_opt), don't run it a second time
+      .preoptimize = false,
       .rewrite = do_rewrite,
   };
 
