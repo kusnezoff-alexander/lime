@@ -164,7 +164,13 @@ fn compiling_receiver<'a>(
             graph,
             |graph| {
                 let start_time = Instant::now();
-                let extractor = OptExtractor::new(graph, CompilingCostFunction { architecture });
+                let extractor = OptExtractor::new(
+                    graph,
+                    CompilingCostFunction {
+                        architecture,
+                        compute_costs: settings.rewrite,
+                    },
+                );
                 t_extractor = start_time.elapsed().as_millis();
                 OptExtractionNetwork(extractor, outputs)
             },
