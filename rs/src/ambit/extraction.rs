@@ -12,6 +12,10 @@ use std::rc::Rc;
 
 pub struct CompilingCostFunction<'a> {
     pub architecture: &'a Architecture,
+    /// Whether to determine the cost of an e-node by compiling its partial program. Without
+    /// e-graph rewriting every e-class contains exactly one e-node, so there is nothing to choose
+    /// and this (very expensive) cost computation can be skipped.
+    pub compute_costs: bool,
 }
 
 #[derive(Debug, Default, Eq, PartialEq)]
@@ -102,6 +106,9 @@ impl<A: Analysis<MigLanguage>> OptCostFunction<MigLanguage, A> for CompilingCost
             return None;
         }
         let root = enode.clone();
+        if !self.compute_costs {
+            return Some(Rc::new(CompilingCost::leaf(root)));
+        }
         let cost = match enode {
             MigLanguage::False | MigLanguage::Input(_) => CompilingCost::leaf(root),
             MigLanguage::Not(id) => {
