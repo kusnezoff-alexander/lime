@@ -120,12 +120,138 @@ ripple_sub( ntk_t& ntk,
 }
 
 template<class ntk_t>
+std::vector<signal<ntk_t>>
+select_bits( ntk_t& ntk, signal<ntk_t> cond,
+             const std::vector<signal<ntk_t>>& if_true,
+             const std::vector<signal<ntk_t>>& if_false )
+{
+  std::vector<signal<ntk_t>> out( if_true.size() );
+  for ( size_t i = 0; i < out.size(); ++i )
+    out[i] = ntk.create_or( ntk.create_and( cond, if_true[i] ),
+                            ntk.create_and( ntk.create_not( cond ), if_false[i] ) );
+  return out;
+}
+
+// Unsigned restoring array divider: quotient a / b, both `a.size()` bits.
+template<class ntk_t>
+std::vector<signal<ntk_t>>
+restoring_div( ntk_t& ntk,
+               const std::vector<signal<ntk_t>>& a_bits,
+               const std::vector<signal<ntk_t>>& b_bits )
+{
+  const size_t bw = a_bits.size();
+  // Working remainder is one bit wider than the operands so the shifted-in
+  // dividend bit never overflows.
+  const size_t rw = bw + 1;
+
+  // Divisor, zero-extended to rw bits.
+  std::vector<signal<ntk_t>> b_ext( rw );
+  for ( size_t i = 0; i < bw; ++i )
+    b_ext[i] = b_bits[i];
+  b_ext[bw] = ntk.get_constant( false );
+
+  // Remainder, initialised to 0.
+  std::vector<signal<ntk_t>> R( rw, ntk.get_constant( false ) );
+  std::vector<signal<ntk_t>> q( bw );
+
+  for ( int i = bw - 1; i >= 0; --i )
+  {
+    // R = (R << 1) | a[i]
+    for ( int k = rw - 1; k >= 1; --k )
+      R[k] = R[k - 1];
+    R[0] = a_bits[i];
+
+    // diff = R - b ; borrow (R < b) means this quotient bit is 0.
+    auto diff = ripple_sub( ntk, R, b_ext );
+    auto lt = ripple_gt( ntk, b_ext, R ); // b > R  <=>  R < b
+    q[i] = ntk.create_not( lt );
+
+    // Restore: keep R if it underflowed, otherwise take the subtracted value.
+    R = select_bits( ntk, lt, R, diff );
+  }
+  return q;
+}
+
+// Signed (two's complement) networks: sgt, sge, smin, smax, sdiv; and mullo,
+// the low `bw` bits of a product (what C and gem5 return for a*b).
+// Inputs: a then b, `bw` bits each, LSB first. `op` is the key without width.
+template<class ntk_t>
+std::optional<ntk_t> get_signed_ntk( std::string const& op, size_t bw )
+{
+  ntk_t ntk;
+  std::vector<signal<ntk_t>> a( bw ), b( bw );
+  for ( auto& s : a )
+    s = ntk.create_pi();
+  for ( auto& s : b )
+    s = ntk.create_pi();
+
+  std::vector<signal<ntk_t>> out;
+  if ( op == "mullo" )
+  {
+    // shift-and-add, every partial product and sum truncated to bw bits
+    std::vector<signal<ntk_t>> acc( bw, ntk.get_constant( false ) );
+    for ( size_t i = 0; i < bw; ++i )
+    {
+      std::vector<signal<ntk_t>> row( bw, ntk.get_constant( false ) );
+      for ( size_t k = i; k < bw; ++k )
+        row[k] = ntk.create_and( a[k - i], b[i] );
+      acc = ripple_add( ntk, acc, row );
+    }
+    out = acc;
+  }
+  else if ( op == "sdiv" )
+  {
+    // |a| / |b| unsigned, negated if the signs differ (truncates toward zero,
+    // like C). |MIN| = MIN read as unsigned, so MIN / -1 wraps to MIN as in C.
+    auto const neg_a = a[bw - 1], neg_b = b[bw - 1];
+    auto const abs_a = select_bits( ntk, neg_a, twos_complement( ntk, a ), a );
+    auto const abs_b = select_bits( ntk, neg_b, twos_complement( ntk, b ), b );
+    auto const q = restoring_div( ntk, abs_a, abs_b );
+    out = select_bits( ntk, ntk.create_xor( neg_a, neg_b ), twos_complement( ntk, q ), q );
+  }
+  else
+  {
+    // signed order = unsigned order with both sign bits inverted
+    auto a_cmp = a, b_cmp = b;
+    a_cmp[bw - 1] = ntk.create_not( a[bw - 1] );
+    b_cmp[bw - 1] = ntk.create_not( b[bw - 1] );
+    auto const gt = ripple_gt( ntk, a_cmp, b_cmp );
+
+    if ( op == "sgt" )
+      out = { gt };
+    else if ( op == "sge" )
+      out = { ntk.create_or( gt, ripple_eq( ntk, a, b ) ) };
+    else if ( op == "smin" )
+      out = select_bits( ntk, gt, b, a );
+    else if ( op == "smax" )
+      out = select_bits( ntk, gt, a, b );
+    else
+      return std::nullopt;
+  }
+
+  for ( auto const& sig : out )
+    ntk.create_po( sig );
+  return ntk;
+}
+
+template<class ntk_t>
 std::optional<ntk_t> get_ntk( std::string const& key )
 {
   // Read from file
   if ( key.find( '.' ) != std::string::npos )
   {
     return read_ntk<ntk_t>( key );
+  }
+
+  // Signed networks and truncated multiplier: sgt8, sdiv16, mullo32, ...
+  for ( std::string const op : { "sgt", "sge", "smin", "smax", "sdiv", "mullo" } )
+  {
+    if ( key.starts_with( op ) && key.size() > op.size() )
+    {
+      auto const bw = std::stoul( key.substr( op.size() ) );
+      if ( bw == 4 || bw == 8 || bw == 16 || bw == 32 || bw == 64 )
+        return get_signed_ntk<ntk_t>( op, bw );
+    }
   }
 
   // Full adder
@@ -558,38 +684,7 @@ std::optional<ntk_t> get_ntk( std::string const& key )
     for ( size_t i = 0; i < bw; ++i )
       b_bits[i] = ntk.create_pi();
 
-    // Working remainder is one bit wider than the operands so the shifted-in
-    // dividend bit never overflows.
-    const size_t rw = bw + 1;
-
-    // Divisor, zero-extended to rw bits.
-    std::vector<signal<ntk_t>> b_ext( rw );
-    for ( size_t i = 0; i < bw; ++i )
-      b_ext[i] = b_bits[i];
-    b_ext[bw] = ntk.get_constant( false );
-
-    // Remainder, initialised to 0.
-    std::vector<signal<ntk_t>> R( rw, ntk.get_constant( false ) );
-    std::vector<signal<ntk_t>> q( bw );
-
-    for ( int i = bw - 1; i >= 0; --i )
-    {
-      // R = (R << 1) | a[i]
-      for ( int k = rw - 1; k >= 1; --k )
-        R[k] = R[k - 1];
-      R[0] = a_bits[i];
-
-      // diff = R - b ; borrow (R < b) means this quotient bit is 0.
-      auto diff = ripple_sub( ntk, R, b_ext );
-      auto lt = ripple_gt( ntk, b_ext, R ); // b > R  <=>  R < b
-      q[i] = ntk.create_not( lt );
-
-      // Restore: keep R if it underflowed, otherwise take the subtracted value.
-      for ( size_t k = 0; k < rw; ++k )
-        R[k] = ntk.create_or(
-            ntk.create_and( lt, R[k] ),
-            ntk.create_and( ntk.create_not( lt ), diff[k] ) );
-    }
+    auto q = restoring_div( ntk, a_bits, b_bits );
 
     // Output the quotient.
     for ( auto& bit : q )
